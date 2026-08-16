@@ -11,7 +11,7 @@ pymongo==4.12.1
 redis==8.0.0
 cryptography==48.0.0
 sshtunnel==0.4.0
-paramiko==3.5.1
+paramiko==5.0.0
 
 
 # LLM/AI
