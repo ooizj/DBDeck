@@ -1,0 +1,25 @@
+# Web Framework
+fastapi==0.136.3
+uvicorn==0.48.0
+pydantic==2.13.4
+
+# Database
+sqlalchemy==2.0.50
+pymysql==1.2.0
+psycopg2-binary==2.9.12
+pymongo==4.12.1
+redis==8.0.0
+cryptography==48.0.0
+sshtunnel==0.4.0
+paramiko==3.5.1
+
+
+# LLM/AI
+openai==2.38.0
+mcp==1.27.1
+
+# Utilities
+python-dotenv==1.2.2
+sqlglot==30.8.0
+openpyxl==3.1.5
+pywebview==5.4

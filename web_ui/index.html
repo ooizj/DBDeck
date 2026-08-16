@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DBDeck</title>
+    <link rel="stylesheet" href="vendor/element-plus.css?v=2">
+    <link rel="stylesheet" href="css/style.css?v=10">
+    <script src="https://unpkg.com/vue@3.5.17/dist/vue.global.prod.js"
+            integrity="sha384-H2xBKUDQ/xne/c7DBZjrLhCc6tXYiUu5WAyegWsUsKWMopvozacrKINTNsuJHeFG"
+            crossorigin="anonymous"></script>
+    <script src="vendor/element-plus.js?v=1"></script>
+    <!-- Load the UMD formatter before Monaco installs its AMD loader. -->
+    <script src="https://cdn.jsdelivr.net/npm/sql-formatter@15.6.10/dist/sql-formatter.min.js"
+            integrity="sha384-R4KUjovLy85M+GwJPNNgTzJryZVowedoFEeq2RbgCZT/wX3Z1y/7E0LR2Hg1iRA3"
+            crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"
+            integrity="sha384-UcP5/iVWyRzIhnVjcB2o9W1eoYKL5fAhHTRzvFZg8ctOsoAoDeBQyQuyIk+BJ/nh"
+            crossorigin="anonymous"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"
+            integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT"
+            crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"
+            integrity="sha384-b0GXujLkk9eYYSmcSfoyZbfyElGAQnDyY0skCHSG6w3JgTMFnz11ggrTAr7seu9f"
+            crossorigin="anonymous"></script>
+</head>
+<body spellcheck="false">
+    <div id="app" v-cloak>
+        <!-- 模态框组件 -->
+        <modals 
+            :show-add-modal="showAddModal" :is-editing="isEditing" :new-source="newSource" :is-testing="isTesting" :is-loading="isLoading"
+            :show-migrate-modal="showMigrateModal" :migrate-source-id="migrateSourceId" :migrate-dest-id="migrateDestId" 
+            :migrate-tables="migrateTables" :selected-migrate-tables="selectedMigrateTables" :sources="sources"
+            :show-d-d-l-modal="showDDLModal" :ddl-table="ddlTable" :ddl-content="ddlContent"
+            :show-config-modal="showConfigModal" :system-config="systemConfig"
+            :available-databases="availableDatabases" :is-discovering="isDiscovering"
+            :show-confirm-modal="showConfirmModal" :confirm-payload="confirmPayload"
+            :show-data-edit-modal="showDataEditModal" :data-edit-source-id="dataEditSourceId" :data-edit-table="dataEditTable"
+            :data-edit-mode="dataEditMode" :data-edit-data="dataEditData" :data-edit-columns="dataEditColumns" :data-edit-primary-key="dataEditPrimaryKey"
+            :show-session-modal="showSessionModal" :session-source-id="sessionSourceId" :session-source-name="sessionSourceName"
+            :show-backup-modal="showBackupModal" :backup-source-id="backupSourceId" :backup-source-name="backupSourceName" :backup-tables="backupTables"
+            :show-search-panel="showSearchPanel" :search-source-id="searchSourceId" :search-tables="searchTables"
+            :show-explain-modal="showExplainModal" :explain-source-id="explainSourceId" :explain-query="explainQuery"
+            :show-compare-modal="showCompareModal" :compare-source-id="compareSourceId" :compare-source-type="compareSourceType" :compare-tables="compareTables"
+            @close-add="showAddModal = false; availableDatabases = []" @test-connection="testConnection" @save-source="saveSource"
+            @discover-databases="discoverDatabases"
+            @close-migrate="showMigrateModal = false" @migrate-source-change="handleMigrateSourceChange" @do-migrate="doMigrate"
+            @update:migrate-dest-id="migrateDestId = $event ? parseInt($event) : null" @update:selected-migrate-tables="selectedMigrateTables = $event"
+            @close-ddl="showDDLModal = false" @copy-ddl="copyToClipboard"
+            @close-config="showConfigModal = false" @save-config="saveSettings"
+            @export-config="exportConfig" @import-config="importConfig"
+            @import-dbeaver-config="importDbeaverConfig"
+            @import-dbeaver-file="importDbeaverFile"
+            @confirm-approve="confirmApprove" @confirm-reject="confirmReject"
+            @close-data-edit="showDataEditModal = false" @data-edit-saved="onDataEditSaved"
+            @close-session="showSessionModal = false"
+            @close-backup="showBackupModal = false"
+            @close-search="showSearchPanel = false" @select-search-result="onSelectSearchResult"
+            @close-explain="showExplainModal = false"
+            @close-compare="showCompareModal = false"
+        ></modals>
+
+        <!-- 自定义右键菜单 -->
+        <div v-if="contextMenu.show" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click.stop>
+            <template v-if="contextMenu.type === 'source'">
+                <div class="menu-item" @click="editSource(contextMenu.data)">Edit Connection</div>
+                <div class="menu-item" @click="duplicateSource(contextMenu.data)">复制连接</div>
+                <div class="menu-separator"></div>
+                <div class="menu-item" @click="openImport(contextMenu.data.id)">导入数据</div>
+                <div v-if="supportsBackup(contextMenu.data)" class="menu-item" @click="openBackup(contextMenu.data.id, contextMenu.data.name)">备份数据库</div>
+                <div class="menu-item" @click="openSessionManager(contextMenu.data.id, contextMenu.data.name)">会话管理</div>
+                <div class="menu-separator"></div>
+                <div class="menu-item" @click="refreshTree">Refresh</div>
+                <div class="menu-item" @click="closeSource(contextMenu.data)">Disconnect</div>
+                <div class="menu-item" @click="deleteSource(contextMenu.data)" style="color: #ff4d4f;">Delete</div>
+            </template>
+            <template v-if="contextMenu.type === 'table'">
+                <div class="menu-item" @click="viewData(contextMenu.data)">View Data</div>
+                <div class="menu-separator"></div>
+                <div class="menu-item" @click="copySelect(contextMenu.data)">Copy SELECT</div>
+                <div class="menu-item" @click="copyInsert(contextMenu.data)">{{ copyInsertLabel(contextMenu.data) }}</div>
+            </template>
+            <template v-if="contextMenu.type === 'workspace-tab'">
+                <div v-if="contextMenu.data.id !== 'sql-console'" class="menu-item" @click="closeWorkspaceTab(contextMenu.data)">关闭标签</div>
+                <div class="menu-item" @click="closeOtherWorkspaceTabs(contextMenu.data)">关闭其他标签</div>
+                <div v-if="hasWorkspaceTabsToRight(contextMenu.data)" class="menu-item" @click="closeWorkspaceTabsToRight(contextMenu.data)">关闭右侧标签</div>
+                <div class="menu-separator"></div>
+                <div class="menu-item" @click="closeAllWorkspaceTabs">关闭全部表标签</div>
+            </template>
+        </div>
+
+        <div class="app-chrome">
+            <div class="workbench-toolbar">
+                <div class="brand-mark">DB</div>
+                <span class="toolbar-separator"></span>
+                <el-button @click="openAddSource" title="新建连接">
+                    <span class="tool-icon">⛁</span><span>新建连接</span>
+                </el-button>
+                <el-button @click="showMigrateModal = true" title="数据传输">
+                    <span class="tool-icon">⇄</span><span>迁移</span>
+                </el-button>
+                <el-button @click="openCompareTool" title="比较结构">
+                    <span class="tool-icon">≋</span><span>比较结构</span>
+                </el-button>
+                <el-button @click="refreshTree" title="刷新导航器">
+                    <span class="tool-icon">↻</span><span>刷新</span>
+                </el-button>
+                <el-button @click="openSettings" title="系统设置">
+                    <span class="tool-icon">⚙</span><span>设置</span>
+                </el-button>
+                <div class="toolbar-context">
+                    <span class="status-dot" :class="{ online: currentSource }"></span>
+                    <span v-if="currentSource">{{ currentSource.name }} / {{ currentSource.database }}</span>
+                    <span v-else>未连接</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <!-- 1. 左侧边栏 (Tabbed Sidebar) -->
+            <div class="sidebar" :style="{ width: sidebarWidth + 'px' }">
+                <!-- Tabs Headers -->
+                <div class="sidebar-tabs">
+                    <button :class="['sidebar-tab', { active: activeTab === 'database' }]" @click="activeTab = 'database'" title="数据库导航">
+                        🗄️ 数据库
+                    </button>
+                    <button :class="['sidebar-tab', { active: activeTab === 'history' }]" @click="activeTab = 'history'" title="查询历史">
+                        📋 历史
+                    </button>
+                </div>
+
+                <!-- Tab 1: Database Connections -->
+                <source-tree
+                    v-show="activeTab === 'database'"
+                    :tree="tree" :current-source="currentSource" :expanded-ids="expandedIds"
+                    v-model:redis-key-pattern="redisKeyPattern"
+                    :redis-toolbar-loading="redisToolbarLoading"
+                    :selected-redis-key-name="selectedRedisKeyName"
+                    @select-source="selectSource" @toggle-expand="toggleExpand" @refresh-node="loadMetadata"
+                    @open-add="openAddSource"
+                    @context-menu="handleContextMenu" @view-data="viewData" @open-table="openTableTab"
+                    @search-redis-keys="searchRedisKeys"
+                    @reset-redis-key-search="resetRedisKeySearch"
+                    @select-redis-key="selectRedisKey"
+                ></source-tree>
+
+                <!-- Tab 2: Query History -->
+                <history-panel
+                    v-show="activeTab === 'history'"
+                    :items="historyItems"
+                    v-model:search="historySearch"
+                    @select="selectHistoryItem"
+                    @clear="clearAllHistory"
+                ></history-panel>
+            </div>
+
+            <div class="resizer-h" @mousedown="startResize('sidebar')"></div>
+
+            <!-- 2. 中间主区域 (SQL 控制台) -->
+            <div class="main-area">
+                <div class="sql-editor-wrapper" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                    <div class="editor-tabs workspace-tabs">
+                        <div v-for="tab in workspaceTabs" :key="tab.id"
+                             :class="['editor-tab', { active: activeWorkspaceTabId === tab.id }]"
+                             @click="activeWorkspaceTabId = tab.id"
+                             @contextmenu.prevent="handleWorkspaceTabContextMenu($event, tab)">
+                            <span class="tab-dot" :class="{ table: tab.type === 'table' }"></span>
+                            <span>{{ tab.title }}</span>
+                            <small>{{ tab.subtitle || (currentProvider ? currentProvider.displayName : 'No source') }}</small>
+                            <button v-if="tab.id !== 'sql-console'" class="tab-close-btn" @click.stop="closeWorkspaceTab(tab)">×</button>
+                        </div>
+                    </div>
+                    <div class="editor-container" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+                        <div v-show="activeWorkspaceTab?.type === 'sql'" class="sql-console-pane">
+                            <sql-editor
+                                :current-source="currentSource" :editor-height="editorHeight"
+                                :disabled="isSqlEditorReadOnly"
+                                @execute="executeQuery()" @execute-all="executeAllSql"
+                                @format="formatSql"
+                            ></sql-editor>
+
+                            <div class="resizer-v" @mousedown="startResize('editor')"></div>
+
+                            <result-area
+                                :query-result="queryResult"
+                                :pagination="queryResult.pagination"
+                                @page-change="changeQueryPage"
+                                @copy="copyToClipboard"
+                                @refresh="refreshQuery"
+                            ></result-area>
+                        </div>
+                        <table-object-view
+                            v-if="activeWorkspaceTab?.type === 'table'"
+                            :source="activeWorkspaceTab.source"
+                            :table="activeWorkspaceTab.table"
+                            :initial-pane="activeWorkspaceTab.pane"
+                            @copy="copyToClipboard"
+                        ></table-object-view>
+                    </div>
+                </div>
+            </div>
+
+            <div class="resizer-h" @mousedown="startResize('ai')"></div>
+
+            <!-- 3. 右侧 AI 面板 -->
+            <ai-panel 
+                :chat-history="chatHistory" v-model="aiInput" :is-generating="isGenerating" :ai-width="aiWidth"
+                @ask="askAI" @stop="stopGeneration" @clear="clearChat" @export="exportChat" @set-sql="setEditorSql" @copy="copyToClipboard"
+            ></ai-panel>
+        </div>
+        <div class="statusbar">
+            <span>{{ queryResult.isRunning ? 'Running' : 'Ready' }}</span>
+            <span v-if="queryResult.executedSql">Rows: {{ queryResult.rowCount }} · Time: {{ queryResult.time }}s</span>
+            <span v-if="currentSource">{{ currentSource.db_type }} · {{ currentSource.database }}</span>
+            <span v-else>选择左侧连接开始工作</span>
+            <span>自动预览最多 100 行</span>
+        </div>
+        <div v-if="isLoading" class="loading-overlay"><div class="spinner"></div></div>
+
+        <!-- Import Modal -->
+        <import-panel v-if="showImportModal" :source-id="importSourceId" :sources="sources"
+            @close="showImportModal = false" @imported="refreshTree"
+            :notify="notify" :show-message="showMessage" :is-loading="isLoading"
+        ></import-panel>
+    </div>
+
+    <script type="module" src="js/app.js?v=refactor-20260729a"></script>
+</body>
+</html>
