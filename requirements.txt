@@ -16,7 +16,7 @@ paramiko==3.5.1
 
 # LLM/AI
 openai==2.38.0
-mcp==1.27.1
+mcp==2.0.0
 
 # Utilities
 python-dotenv==1.2.2
