@@ -28,12 +28,13 @@ def platform_settings() -> tuple[Path, list[str], Path]:
         return (
             ROOT / "assets" / "app-icon.ico",
             [
+                "--onefile",
                 "--hidden-import",
                 "webview.platforms.winforms",
                 "--hidden-import",
                 "webview.platforms.edgechromium",
             ],
-            ROOT / "dist" / APP_NAME,
+            ROOT / "dist" / f"{APP_NAME}.exe",
         )
     raise SystemExit("Desktop packaging currently supports macOS and Windows only.")
 
@@ -102,7 +103,7 @@ def main() -> None:
     print()
     print(f"打包完成: {app_path}")
     if sys.platform == "win32":
-        print(f"可以双击 {app_path / (APP_NAME + '.exe')} 启动。")
+        print(f"可以双击 {app_path} 启动。")
     else:
         print("可以双击 dist 目录里的 DBDeck.app 启动。")
     print(f"构建缓存: {build_dir}")
