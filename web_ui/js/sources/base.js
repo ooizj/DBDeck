@@ -7,7 +7,7 @@
  *   - capabilities { ddl, migrate, explain, backup, hasSchema }
  *   - connFormFields              连接表单字段定义（给 Modals.js）
  *   - registerCompletion(monaco, ctx)
- *       ctx: { getCurrentTables(), getCurrentSource() }
+ *       ctx: { getCurrentTables(), getCurrentSource(), getModelText() }
  *   - buildSelectQuery(table)     "查看数据" / "Copy SELECT"
  *   - buildInsertQuery(table)
  *   - buildPreviewQuery(table)    点击节点时自动执行的 SQL

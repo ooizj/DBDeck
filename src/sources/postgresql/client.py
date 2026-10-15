@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import URL
+from sqlalchemy.engine.reflection import ObjectKind
 from sqlalchemy.exc import SAWarning, SQLAlchemyError
 
 from src.common.config import config
@@ -227,20 +228,20 @@ class PostgreSQLClient(DataSourceClient):
     def get_schema(self) -> Dict[str, Any]:
         if not self.engine.url.database:
             raise ValueError("PostgreSQL 数据库名称不能为空，请先选择或填写数据库名称")
+        # get_multi_* 在 PostgreSQL 方言里是批量查询，避免逐表反射
         inspector = inspect(self.engine)
+        columns_by_table = inspector.get_multi_columns(kind=ObjectKind.TABLE | ObjectKind.VIEW)
+        pk_by_table = inspector.get_multi_pk_constraint(kind=ObjectKind.TABLE)
         schema: Dict[str, Any] = {}
-        relation_names = [
-            *inspector.get_table_names(),
-            *inspector.get_view_names(),
-        ]
-        for table_name in relation_names:
-            columns = inspector.get_columns(table_name)
-            schema[table_name] = [
+        for table_key, columns in columns_by_table.items():
+            pk_columns = set((pk_by_table.get(table_key) or {}).get("constrained_columns") or [])
+            schema[table_key[1]] = [
                 {
                     "name": c["name"],
                     "type": str(c["type"]),
                     "nullable": c["nullable"],
                     "comment": c.get("comment") or "",
+                    "primary_key": c["name"] in pk_columns,
                 }
                 for c in columns
             ]
@@ -266,18 +267,11 @@ class PostgreSQLClient(DataSourceClient):
 
     def get_table_comments(self) -> Dict[str, str]:
         inspector = inspect(self.engine)
-        comments: Dict[str, str] = {}
-        relation_names = [
-            *inspector.get_table_names(),
-            *inspector.get_view_names(),
-        ]
-        for table_name in relation_names:
-            try:
-                table_comment = inspector.get_table_comment(table_name) or {}
-                comments[table_name] = table_comment.get("text") or ""
-            except Exception:
-                comments[table_name] = ""
-        return comments
+        comments = inspector.get_multi_table_comment(kind=ObjectKind.TABLE | ObjectKind.VIEW)
+        return {
+            table_key[1]: (comment or {}).get("text") or ""
+            for table_key, comment in comments.items()
+        }
 
     def get_ddl(self, table_name: str) -> Optional[str]:
         inspector = inspect(self.engine)

@@ -217,6 +217,7 @@ class SQLiteClient(DataSourceClient):
                     "type": str(c["type"]),
                     "nullable": c["nullable"],
                     "comment": c.get("comment") or "",
+                    "primary_key": bool(c.get("primary_key")),
                 }
                 for c in columns
             ]
@@ -270,3 +271,6 @@ class SQLiteClient(DataSourceClient):
                         "ref_column": ref_col,
                     })
         return result
+
+    def close(self) -> None:
+        self.engine.dispose()

@@ -11,14 +11,11 @@ _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 _CONTENT_SECURITY_POLICY = "; ".join(
     [
         "default-src 'self'",
-        (
-            "script-src 'self' 'unsafe-eval' https://unpkg.com "
-            "https://cdnjs.cloudflare.com https://cdn.sheetjs.com "
-            "https://cdn.jsdelivr.net"
-        ),
-        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com",
+        # 前端依赖均已放在 web_ui/vendor，本地加载，不再放行外部 CDN
+        "script-src 'self' 'unsafe-eval'",
+        "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: blob:",
-        "font-src 'self' data: https://cdnjs.cloudflare.com",
+        "font-src 'self' data:",
         "connect-src 'self'",
         "worker-src 'self' blob:",
         "object-src 'none'",

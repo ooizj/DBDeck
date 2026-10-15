@@ -51,11 +51,21 @@ app.add_middleware(LocalOriginMiddleware)
 # 注册 API 路由
 app.include_router(router, prefix="/api")
 
+
+class RevalidatingStaticFiles(StaticFiles):
+    """静态资源每次都向服务端校验（ETag），避免 WebView 缓存旧版 JS 模块。"""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # 最合理的静态文件挂载方式：
 # 1. 挂载 web_ui 目录到根路径 /
 # 2. html=True 会让 FastAPI 在访问 / 时自动查找 index.html
 # 3. 这种方式能自动处理 css/, js/ 等所有子目录
-app.mount("/", StaticFiles(directory=resource_path("web_ui"), html=True), name="web_ui")
+app.mount("/", RevalidatingStaticFiles(directory=resource_path("web_ui"), html=True), name="web_ui")
 
 # 注意：开启 html=True 后，就不再需要显式的 @app.get("/") 路由了。
 # 如果仍需显式控制，确保它在 mount 之前定义。

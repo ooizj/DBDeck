@@ -1,11 +1,12 @@
 import { createSqlCompletion } from '../utils/sqlCompletion.js';
 
 const sqlKeywords = [
-    'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'ORDER BY', 'GROUP BY',
+    'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'LIKE', 'ILIKE',
+    'BETWEEN', 'IS NULL', 'IS NOT NULL', 'ASC', 'DESC', 'USING', 'ORDER BY', 'GROUP BY',
     'LIMIT', 'OFFSET', 'JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN',
     'FULL JOIN', 'CROSS JOIN', 'ON', 'AS', 'INSERT INTO', 'UPDATE',
     'DELETE', 'SET', 'VALUES', 'RETURNING', 'CREATE TABLE', 'ALTER TABLE',
-    'DROP TABLE', 'INDEX', 'WITH', 'CTE', 'UNION', 'INTERSECT', 'EXCEPT',
+    'DROP TABLE', 'INDEX', 'WITH', 'UNION', 'INTERSECT', 'EXCEPT',
     'DISTINCT', 'HAVING', 'WINDOW', 'OVER', 'PARTITION BY',
 ];
 

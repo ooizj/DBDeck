@@ -226,7 +226,7 @@ LLM 参数可写入 `.env`，也可通过界面“设置”保存到 `config.db`
 
 ## 开发说明
 
-- **前端**：原生 ES Modules，无 `npm install`；外部加载的浏览器依赖固定到精确版本并使用 SRI 校验，首次加载需要访问相应 CDN
+- **前端**：原生 ES Modules，无 `npm install`；浏览器依赖（Vue、Element Plus、Monaco、sql-formatter、SheetJS、Chart.js）固定版本并放在 `web_ui/vendor/`，本地加载，离线可用
 - **AI 事件流**：NDJSON，前端处理 `delta` / `tool_start` / `tool_end` / `confirm_required` / `final` / `error` 事件
 - **修改提示词**：编辑 `src/sources/<type>/prompts/*.md`，重启服务生效
 - **切换数据源**：Agent 检测到 provider 变化会自动 reset 历史（避免 MySQL 上下文跑到 Mongo 对话里）

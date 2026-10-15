@@ -179,3 +179,69 @@ test('completion stays closed inside SQL literals and comments', () => {
         assert.deepEqual(complete(input), [], input);
     }
 });
+
+
+test('leading comments do not hide SELECT field completion', () => {
+    const labels = complete('-- 查询用户\nSELECT | FROM users').map(item => item.label);
+
+    assert.deepEqual(labels.slice(0, 2), ['id', 'name']);
+});
+
+
+test('UPDATE / DELETE / INSERT column positions suggest fields of the target table', () => {
+    const inputs = [
+        'UPDATE users SET |',
+        'UPDATE users SET name = |',
+        'UPDATE users u SET u.name = 1 WHERE |',
+        'DELETE FROM users WHERE |',
+        'INSERT INTO users (|',
+        'INSERT INTO users (id, |',
+    ];
+
+    for (const input of inputs) {
+        const labels = complete(input).map(item => item.label);
+        assert.equal(labels.includes('id'), true, input);
+        assert.equal(labels.includes('name'), true, input);
+        assert.equal(labels.includes('action'), false, input);
+    }
+    assert.deepEqual(complete('INSERT INTO users (id) VALUES (|'), []);
+});
+
+
+test('alias and table lookups are case-insensitive and handle partial words', () => {
+    assert.deepEqual(complete('SELECT U.| FROM Users u').map(item => item.label), ['id', 'name']);
+    assert.deepEqual(complete('SELECT u.na| FROM users u').map(item => item.label), ['id', 'name']);
+    assert.deepEqual(complete('SELECT `u`.| FROM `users` AS `u`').map(item => item.label), ['id', 'name']);
+});
+
+
+test('comma separated and schema qualified relations are recognised', () => {
+    const labels = complete('SELECT | FROM users u, audit_log a').map(item => item.label);
+    assert.equal(labels.includes('name'), true);
+    assert.equal(labels.includes('action'), true);
+
+    assert.deepEqual(complete('SELECT a.| FROM mydb.users u, mydb.audit_log a').map(item => item.label), ['action']);
+    assert.deepEqual(complete('SELECT * FROM users, |').map(item => item.label), ['users', 'audit_log']);
+    assert.deepEqual(complete('SELECT * FROM mydb.|').map(item => item.label), ['users', 'audit_log']);
+    assert.deepEqual(complete('SELECT * FROM `|').map(item => item.label), ['users', 'audit_log']);
+});
+
+
+test('clause detection ignores keywords inside identifiers and string literals', () => {
+    const labels = complete("SELECT valid_from, | FROM users WHERE name = 'where'").map(item => item.label);
+    assert.equal(labels.includes('DISTINCT'), true);
+    assert.equal(labels.includes('AND'), false);
+
+    const whereLabels = complete("SELECT * FROM users WHERE name = 'from' AND |").map(item => item.label);
+    assert.equal(whereLabels.includes('AND'), true);
+    assert.equal(whereLabels.includes('AS'), false);
+});
+
+
+test('MySQL keyword list covers clause keywords offered in context', () => {
+    const selectLabels = complete('SELECT | FROM users').map(item => item.label);
+    assert.equal(selectLabels.includes('DISTINCT'), true);
+
+    const orderLabels = complete('SELECT * FROM users ORDER BY id d|').map(item => item.label);
+    assert.equal(orderLabels.includes('DESC'), true);
+});

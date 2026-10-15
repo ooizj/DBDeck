@@ -226,25 +226,28 @@ class MySQLClient(DataSourceClient):
         return metadata
 
     def get_schema(self) -> Dict[str, Any]:
-        if not self.engine.url.database:
+        database = self.engine.url.database
+        if not database:
             raise ValueError("MySQL 数据库名称不能为空，请先选择或填写数据库名称")
-        inspector = inspect(self.engine)
+        # 一次查询拿到所有表/视图的字段，避免逐表 SHOW CREATE TABLE 在大库上很慢
+        with self.engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_COMMENT
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = :schema
+                ORDER BY TABLE_NAME, ORDINAL_POSITION
+            """), {"schema": database}).fetchall()
         schema: Dict[str, Any] = {}
-        relation_names = [
-            *inspector.get_table_names(),
-            *inspector.get_view_names(),
-        ]
-        for table_name in relation_names:
-            columns = inspector.get_columns(table_name)
-            schema[table_name] = [
+        for table_name, column_name, column_type, is_nullable, column_key, column_comment in rows:
+            schema.setdefault(table_name, []).append(
                 {
-                    "name": c["name"],
-                    "type": str(c["type"]),
-                    "nullable": c["nullable"],
-                    "comment": c.get("comment") or "",
+                    "name": column_name,
+                    "type": column_type,
+                    "nullable": str(is_nullable).upper() == "YES",
+                    "comment": column_comment or "",
+                    "primary_key": column_key == "PRI",
                 }
-                for c in columns
-            ]
+            )
         return schema
 
     def get_object_types(self) -> Dict[str, str]:
@@ -267,19 +270,20 @@ class MySQLClient(DataSourceClient):
         return object_types
 
     def get_table_comments(self) -> Dict[str, str]:
-        inspector = inspect(self.engine)
-        comments: Dict[str, str] = {}
-        relation_names = [
-            *inspector.get_table_names(),
-            *inspector.get_view_names(),
-        ]
-        for table_name in relation_names:
-            try:
-                table_comment = inspector.get_table_comment(table_name) or {}
-                comments[table_name] = table_comment.get("text") or ""
-            except Exception:
-                comments[table_name] = ""
-        return comments
+        database = self.engine.url.database
+        if not database:
+            return {}
+        with self.engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT TABLE_NAME, TABLE_TYPE, TABLE_COMMENT
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = :schema
+            """), {"schema": database}).fetchall()
+        # 视图在 information_schema 里没有真正的注释，统一置空
+        return {
+            table_name: "" if "VIEW" in str(table_type).upper() else (table_comment or "")
+            for table_name, table_type, table_comment in rows
+        }
 
     def get_ddl(self, table_name: str) -> Optional[str]:
         quoted_table = table_name.replace("`", "``")

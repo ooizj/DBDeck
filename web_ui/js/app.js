@@ -8,15 +8,15 @@ import Modals from './components/Modals.js';
 import HistoryPanel from './components/HistoryPanel.js';
 import ImportPanel from './components/ImportPanel.js';
 import { getProvider, listProviders } from './sources/registry.js?v=7features-20260610';
-import { useAiSession } from './state/useAiSession.js';
+import { useAiChat } from './state/useAiChat.js';
 import { useNotifications } from './state/useNotifications.js';
 import { useRedis } from './state/useRedis.js';
 import { useQueryHistory } from './state/useQueryHistory.js';
 import { useSettings } from './state/useSettings.js';
 import { useMigration } from './state/useMigration.js';
-import { splitSqlStatementsWithOffsets } from './utils/sqlHelpers.js';
+import { useSqlEditor } from './state/useSqlEditor.js';
 import { defaultSourceConfig, sourcePayload } from './utils/sourceHelpers.js';
-import { shouldLockSqlEditor, updateEditorReadOnly } from './utils/editorState.js';
+import { shouldLockSqlEditor } from './utils/editorState.js';
 
 const { createApp, ref, reactive, onMounted, onBeforeUnmount, nextTick, watch, computed, provide } = Vue;
 
@@ -36,9 +36,6 @@ const app = createApp({
         const workspaceTabs = ref([{ id: 'sql-console', type: 'sql', title: 'SQL Console' }]);
         const activeWorkspaceTabId = ref('sql-console');
         const activeWorkspaceTab = computed(() => workspaceTabs.value.find(tab => tab.id === activeWorkspaceTabId.value) || workspaceTabs.value[0]);
-
-        const showConfirmModal = ref(false);
-        const confirmPayload = ref(null);
 
         // 左侧栏 tab 状态（database / history）
         const activeTab = ref('database');
@@ -147,9 +144,7 @@ const app = createApp({
             // 处理搜索结果选择
             if (result.type === 'table') {
                 // 如果选择了表，在编辑器中生成查询
-                if (editor) {
-                    editor.setValue(`SELECT * FROM ${result.name} LIMIT 100;`);
-                }
+                sqlEditor.setValue(`SELECT * FROM ${result.name} LIMIT 100;`);
             } else if (result.table) {
                 // 如果选择了数据，打开表数据
                 viewData({ source_id: searchSourceId.value, name: result.table });
@@ -162,12 +157,12 @@ const app = createApp({
         const explainQuery = ref('');
 
         const openExplainPlan = () => {
-            if (!currentSource.value || !editor) {
+            if (!currentSource.value || !getEditor()) {
                 notify('请先选择数据源并输入SQL', 'warning');
                 return;
             }
             
-            const query = editor.getValue().trim();
+            const query = sqlEditor.getValue().trim();
             if (!query) {
                 notify('请输入要分析的SQL', 'warning');
                 return;
@@ -268,15 +263,10 @@ const app = createApp({
                 isRunning: false
             });
         };
-        const chatHistory = ref([{ role: 'ai', content: '欢迎来到 DBDeck。选择左侧连接后，可以让我解释结构、生成查询或分析结果。' }]);
-        const aiInput = ref('');
         const isLoading = ref(false);
         const isTesting = ref(false);
         const isDiscovering = ref(false);
         const availableDatabases = ref([]);
-        const isGenerating = ref(false);
-        const { aiSessionId } = useAiSession();
-        let abortController = null;
 
         const { notify, showMessage, showConfirm } = useNotifications();
         // 通过 provide/inject 向所有子组件（含 el-dialog append-to-body 弹窗）提供 dbService，
@@ -284,6 +274,25 @@ const app = createApp({
         provide('dbService', dbService);
 
         // --- Composables ---
+
+        const sqlEditor = useSqlEditor({
+            dbService,
+            getCurrentSource: () => currentSource.value,
+            getCurrentProvider: () => currentProvider.value,
+            getCurrentTables: () => currentTables.value,
+            getProvider,
+            isReadOnly: isSqlEditorReadOnly,
+            notify,
+        });
+        const getEditor = sqlEditor.getEditor;
+
+        const aiChat = useAiChat({
+            dbService,
+            getCurrentSource: () => currentSource.value,
+            queryResult,
+            notify, showMessage, showConfirm,
+        });
+        const { chatHistory, aiInput, isGenerating, showConfirmModal, confirmPayload } = aiChat;
 
         const redis = useRedis({
             dbService,
@@ -296,7 +305,7 @@ const app = createApp({
 
         const queryHistory = useQueryHistory({
             dbService,
-            getEditor: () => editor,
+            getEditor,
             getEditorMode: () => editorMode,
             getActiveTab: () => activeTab,
             showMessage, showConfirm, notify,
@@ -323,14 +332,6 @@ const app = createApp({
         const sidebarWidth = ref(250);
         const aiWidth = ref(300);
         const editorHeight = ref(250);
-
-        let editor = null;
-        let autoSaveTimer = null;
-        let suggestDetailsTimer = null;
-        let isApplyingScript = false;
-        watch(isSqlEditorReadOnly, readOnly => updateEditorReadOnly(editor, readOnly));
-        // 已注册过 completion provider 的 Monaco language id，避免重复注册
-        const registeredLanguages = new Set();
 
         const showAddModal = ref(false);
         const isEditing = ref(false);
@@ -461,33 +462,6 @@ const app = createApp({
             }
         };
 
-        const applyEditorLanguage = () => {
-            if (!editor || !currentSource.value) return;
-            const provider = getProvider(currentSource.value.db_type);
-            monaco.editor.setModelLanguage(editor.getModel(), provider.editorLanguage);
-        };
-
-        const setEditorScript = (content) => {
-            if (!editor) return;
-            isApplyingScript = true;
-            try {
-                editor.setValue(content || '');
-                applyEditorLanguage();
-            } finally {
-                isApplyingScript = false;
-            }
-        };
-
-        const loadSourceScript = async (source) => {
-            if (!source || !editor) return;
-            try {
-                const res = await dbService.getScript(source.id);
-                if (res.success) setEditorScript(res.content || '');
-            } catch (e) {
-                console.error('Failed to fetch script', e);
-            }
-        };
-
         const disconnectSourceRuntime = async (source, { clearScript = false } = {}) => {
             if (!source) return;
             closeObjectTabs(source.id);
@@ -503,21 +477,7 @@ const app = createApp({
             } catch (e) {
                 console.error('Failed to disconnect source', e);
             }
-            if (clearScript && editor) editor.setValue('');
-        };
-
-        const saveCurrentSourceScript = async () => {
-            if (currentSource.value && editor) {
-                if (autoSaveTimer) {
-                    clearTimeout(autoSaveTimer);
-                    autoSaveTimer = null;
-                }
-                try {
-                    await dbService.saveScript(currentSource.value.id, editor.getValue());
-                } catch (e) {
-                    console.error('Failed to save script', e);
-                }
-            }
+            if (clearScript) sqlEditor.setValue('');
         };
 
         const selectSource = async (source) => {
@@ -531,11 +491,11 @@ const app = createApp({
                         await loadMetadata(source);
                     }
                     editorMode.value = 'sql';
-                    if (editor && !editor.getValue()) await loadSourceScript(source);
+                    if (getEditor() && !sqlEditor.getValue()) await sqlEditor.loadSourceScript(source);
                     return;
                 }
 
-                await saveCurrentSourceScript();
+                await sqlEditor.saveCurrentSourceScript();
                 if (currentSource.value) {
                     await disconnectSourceRuntime(currentSource.value);
                 }
@@ -549,7 +509,7 @@ const app = createApp({
                 if (!source.children || source.children.length === 0) {
                     await loadMetadata(source);
                 }
-                await loadSourceScript(source);
+                await sqlEditor.loadSourceScript(source);
             } finally {
                 isSourceSwitching.value = false;
             }
@@ -575,12 +535,8 @@ const app = createApp({
             if (index > -1) expandedIds.value.splice(index, 1);
             const wasCurrentSource = currentSource.value?.id === source.id;
             if (wasCurrentSource) {
-                if (abortController) {
-                    abortController.abort();
-                    abortController = null;
-                }
-                isGenerating.value = false;
-                await saveCurrentSourceScript();
+                aiChat.cancelGeneration();
+                await sqlEditor.saveCurrentSourceScript();
                 currentSource.value = null;
                 currentTables.value = [];
                 editorMode.value = 'sql';
@@ -670,17 +626,13 @@ const app = createApp({
             if (await showConfirm(`确定要删除数据源 "${source.name}" 吗？`)) {
                 try {
                     if (currentSource.value?.id === source.id) {
-                        if (abortController) {
-                            abortController.abort();
-                            abortController = null;
-                        }
+                        aiChat.cancelGeneration();
                         closeObjectTabs(source.id);
-                        isGenerating.value = false;
                         currentSource.value = null;
                         currentTables.value = [];
                         expandedIds.value = expandedIds.value.filter(id => id !== source.id);
                         editorMode.value = 'sql';
-                        if (editor) editor.setValue('');
+                        sqlEditor.setValue('');
                         resetQueryResult();
                         if (source.db_type === 'redis') redis.resetRedisNavigator(source);
                     }
@@ -704,15 +656,13 @@ const app = createApp({
 
         // 切换数据源时同步 Monaco 语言 + 注册补全
         watch(currentSource, (source) => {
-            applyEditorLanguage();
-            ensureCompletionRegistered();
+            sqlEditor.applyEditorLanguage();
+            sqlEditor.ensureCompletionRegistered();
             if (source?.db_type === 'redis') {
                 redis.redisKeyPattern.value = source.redisKeyPattern || '*';
             } else {
                 redis.resetRedisKeyEditor();
-                nextTick(() => {
-                    if (editor) editor.layout();
-                });
+                nextTick(() => sqlEditor.layout());
             }
         });
 
@@ -1057,27 +1007,6 @@ const app = createApp({
             copyToClipboard(getProvider(source.db_type).buildSelectQuery(table));
         };
 
-        // splitSqlStatementsWithOffsets 已抽到 ./utils/sqlHelpers.js
-
-        const getCurrentSqlStatement = () => {
-            if (!editor) return '';
-            const model = editor.getModel();
-            const text = model.getValue();
-            if (currentSource.value?.db_type === 'redis') {
-                const line = model.getLineContent(editor.getPosition().lineNumber).trim();
-                if (line && !line.startsWith('#')) return line;
-                const commands = text
-                    .split(/\r?\n/)
-                    .map(item => item.trim())
-                    .filter(item => item && !item.startsWith('#'));
-                return commands[0] || '';
-            }
-            const offset = model.getOffsetAt(editor.getPosition());
-            const statements = splitSqlStatementsWithOffsets(text);
-            const current = statements.find(stmt => offset >= stmt.start && offset <= stmt.end);
-            return (current || statements[0])?.text || '';
-        };
-
         const applyQueryResult = (data, fallbackSql, elapsedSeconds, editableContext = null) => {
             const statements = Array.isArray(data.statements) ? data.statements : [];
             const activeIndex = Number.isInteger(data.active_statement_index)
@@ -1143,14 +1072,7 @@ const app = createApp({
         const executeQuery = async (queryOverride, options = {}) => {
             if (isSqlEditorReadOnly.value) return;
             let query = queryOverride;
-            if (!query && editor) {
-                const selection = editor.getSelection();
-                if (selection && !selection.isEmpty()) {
-                    query = editor.getModel().getValueInRange(selection);
-                } else {
-                    query = getCurrentSqlStatement();
-                }
-            }
+            if (!query) query = sqlEditor.getSelectedOrCurrentSql();
             if (!query || !query.trim() || !currentSource.value) {
                 if (!currentSource.value) notify('请先选择一个数据源', 'warning');
                 return;
@@ -1241,244 +1163,8 @@ const app = createApp({
         };
 
         const executeAllSql = () => {
-            if (!editor || !currentSource.value) return;
-            executeQuery(editor.getValue());
-        };
-
-        const runQuery = async (queryText, { showAsUser = true } = {}) => {
-            if (isGenerating.value) return;
-            isGenerating.value = true;
-            abortController = new AbortController();
-            if (showAsUser) chatHistory.value.push({ role: 'user', content: queryText });
-            try {
-                const response = await fetch('/api/query', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        query: queryText,
-                        source_id: currentSource.value?.id,
-                        workspace_id: null,
-                        session_id: aiSessionId
-                    }),
-                    signal: abortController.signal
-                });
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = '';
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop();
-                    for (const line of lines) { if (line.trim()) handleAIEvent(JSON.parse(line)); }
-                }
-            } catch (e) {
-                if (e.name === 'AbortError') chatHistory.value.push({ role: 'ai', content: '已停止生成。', isFinal: true, collapsed: false });
-                else chatHistory.value.push({ role: 'ai', content: '错误: ' + e.message });
-            } finally { isGenerating.value = false; abortController = null; }
-        };
-
-        const askAI = async () => {
-            const input = aiInput.value.trim();
-            if (!input || isGenerating.value) return;
-            aiInput.value = '';
-            await runQuery(input);
-        };
-
-        const confirmApprove = async () => {
-            if (!confirmPayload.value) return;
-            const pid = confirmPayload.value.pending_id;
-            const calls = confirmPayload.value.calls;
-            showConfirmModal.value = false;
-            chatHistory.value.push({
-                role: 'ai',
-                content: `✓ 用户已确认：${calls.map(c => c.tool).join(', ')}`,
-                isFinal: true,
-                isSystem: true
-            });
-            confirmPayload.value = null;
-            await runQuery(`__confirm__:${pid}:approve`, { showAsUser: false });
-        };
-
-        const confirmReject = async () => {
-            if (!confirmPayload.value) return;
-            const pid = confirmPayload.value.pending_id;
-            showConfirmModal.value = false;
-            chatHistory.value.push({
-                role: 'ai',
-                content: '✗ 用户已拒绝执行该批次操作。',
-                isFinal: true,
-                isSystem: true
-            });
-            confirmPayload.value = null;
-            await runQuery(`__confirm__:${pid}:reject`, { showAsUser: false });
-        };
-
-        const handleAIEvent = (e) => {
-            const lastMsg = chatHistory.value[chatHistory.value.length - 1];
-            if (e.type === 'delta') {
-                if (lastMsg && lastMsg.role === 'ai' && !lastMsg.isFinal) {
-                    lastMsg.content += e.content;
-                } else {
-                    chatHistory.value.push({ role: 'ai', content: e.content, isFinal: false, collapsed: false });
-                }
-            } else if (e.type === 'tool_start') {
-                chatHistory.value.push({ role: 'tool_log', tool: e.tool, args: e.args, done: false });
-            } else if (e.type === 'tool_end') {
-                const log = [...chatHistory.value].reverse().find(m => m.role === 'tool_log' && m.tool === e.tool && !m.done);
-                if (log) {
-                    log.done = true;
-                    log.result = e.result;
-                }
-            } else if (e.type === 'confirm_required') {
-                confirmPayload.value = { pending_id: e.pending_id, calls: e.calls };
-                showConfirmModal.value = true;
-            } else if (e.type === 'final') {
-                if (lastMsg && lastMsg.role === 'ai' && !lastMsg.isFinal) {
-                    lastMsg.isFinal = true;
-                    if (e.queries && e.queries.length) lastMsg.queries = e.queries;
-                    else delete lastMsg.queries;
-                    if (e.sql) lastMsg.sql = e.sql;
-                    else delete lastMsg.sql;
-                    if (!lastMsg.content || lastMsg.content.trim() === '') lastMsg.content = e.answer;
-                } else {
-                    const newMsg = { role: 'ai', content: e.answer, isFinal: true, collapsed: false };
-                    if (e.queries && e.queries.length) newMsg.queries = e.queries;
-                    if (e.sql) newMsg.sql = e.sql;
-                    chatHistory.value.push(newMsg);
-                }
-                if (e.data && (
-                    e.data.source_id === undefined
-                    || e.data.source_id === null
-                    || currentSource.value?.id === e.data.source_id
-                )) {
-                    Object.assign(queryResult, {
-                        columns: e.data.columns || [],
-                        column_metadata: e.data.column_metadata || {},
-                        rows: e.data.data || [],
-                        rowCount: e.data.row_count,
-                        time: 'AI',
-                        durationMs: e.data.duration_ms ?? null,
-                        executedSql: e.data.executed_queries?.length ? e.data.executed_queries.join('\n') : e.data.executed_sql,
-                        operationKind: e.data.operation_kind || '',
-                        statements: e.data.statements || [],
-                        activeStatementIndex: e.data.active_statement_index || 0,
-                        editable: {
-                            enabled: false,
-                            sourceId: null,
-                            table: '',
-                            primaryKey: null,
-                            columns: [],
-                            reason: 'AI 查询结果默认只读'
-                        }
-                    });
-                }
-            } else if (e.type === 'error') {
-                chatHistory.value.push({ role: 'ai', content: '❌ 错误: ' + e.message, isFinal: true, isError: true });
-            }
-            nextTick(() => { const box = document.querySelector('.ai-chat'); if (box) box.scrollTop = box.scrollHeight; });
-        };
-
-        const exportChat = async () => {
-            let markdown = '# 数据库客户端 AI 对话记录\n\n';
-            markdown += `导出时间: ${new Date().toLocaleString('zh-CN')}\n\n`;
-            if (currentSource.value) {
-                markdown += `数据源: ${currentSource.value.name} (${currentSource.value.database})\n\n`;
-            }
-            markdown += '---\n\n';
-            let messageIndex = 0;
-            chatHistory.value.forEach((msg, idx) => {
-                if (msg.role === 'user') {
-                    messageIndex++;
-                    markdown += `## 用户 (${messageIndex})\n\n${msg.content}\n\n`;
-                } else if (msg.role === 'ai') {
-                    messageIndex++;
-                    markdown += `## AI 助手 (${messageIndex})\n\n${msg.content}\n\n`;
-                    if (msg.queries?.length) markdown += `**执行的查询:**\n\`\`\`\n${msg.queries.join('\n')}\n\`\`\`\n\n`;
-                    else if (msg.sql) markdown += `**执行的查询:**\n\`\`\`\n${msg.sql}\n\`\`\`\n\n`;
-
-                    const isLastMsg = (idx === chatHistory.value.length - 1);
-                    if (!msg.isFinal && isLastMsg) {
-                        markdown += `_（此消息可能未完成或被中断）_\n\n`;
-                    }
-                } else if (msg.role === 'tool_log') {
-                    markdown += `> 🛠️ **工具调用**: \`${msg.tool}\` (${msg.done ? '已完成' : '执行中'})\n`;
-                    if (msg.args) {
-                        markdown += `> * **请求参数**:\n>   \`\`\`json\n>   ${JSON.stringify(msg.args, null, 2).split('\n').join('\n>   ')}\n>   \`\`\`\n`;
-                    }
-                    if (msg.result) {
-                        markdown += `> * **返回结果**:\n>   \`\`\`json\n>   ${JSON.stringify(msg.result, null, 2).split('\n').join('\n>   ')}\n>   \`\`\`\n`;
-                    }
-                    markdown += `\n`;
-                }
-            });
-
-            const filename = `chat-export-${Date.now()}.md`;
-            if (window.pywebview?.api?.save_markdown) {
-                try {
-                    const res = await window.pywebview.api.save_markdown(filename, markdown);
-                    if (res?.success) {
-                        notify('聊天记录已导出', 'success');
-                    } else if (!res?.cancelled) {
-                        showMessage('导出失败: ' + (res?.error || '未知错误'), '错误', 'error');
-                    }
-                    return;
-                } catch (e) {
-                    showMessage('导出失败: ' + e.message, '错误', 'error');
-                    return;
-                }
-            }
-
-            if (window.showSaveFilePicker) {
-                try {
-                    const handle = await window.showSaveFilePicker({
-                        suggestedName: filename,
-                        types: [{
-                            description: 'Markdown',
-                            accept: { 'text/markdown': ['.md'] },
-                        }],
-                    });
-                    const writable = await handle.createWritable();
-                    await writable.write(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }));
-                    await writable.close();
-                    notify('聊天记录已导出', 'success');
-                    return;
-                } catch (e) {
-                    if (e.name === 'AbortError') return;
-                    showMessage('导出失败: ' + e.message, '错误', 'error');
-                    return;
-                }
-            }
-
-            const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            notify('聊天记录已导出', 'success');
-        };
-
-        const stopGeneration = () => {
-            if (abortController) {
-                abortController.abort();
-                abortController = null;
-            }
-        };
-
-        const clearChat = async () => {
-            if (await showConfirm('确定要清空对话历史吗？')) {
-                try {
-                    await dbService.clearChat(aiSessionId);
-                    chatHistory.value = [{ role: 'ai', content: '对话已清空，请开始新的对话。' }];
-                    notify('对话已清空', 'success');
-                } catch (e) {
-                    showMessage('清空失败: ' + e.message, '错误', 'error');
-                }
-            }
+            if (!getEditor() || !currentSource.value) return;
+            executeQuery(sqlEditor.getValue());
         };
 
         const startResize = (type) => {
@@ -1502,148 +1188,13 @@ const app = createApp({
             window.addEventListener('mouseup', onUp);
         };
 
-        const ensureCompletionRegistered = () => {
-            if (!editor || !currentProvider.value) return;
-            const lang = currentProvider.value.editorLanguage;
-            if (registeredLanguages.has(lang)) return;
-            const completion = currentProvider.value.registerCompletion(monaco, {
-                getCurrentTables: () => currentTables.value,
-                getCurrentSource: () => currentSource.value,
-                getModelText: () => (editor ? editor.getValue() : ''),
-            });
-            if (completion && completion.provideCompletionItems) {
-                monaco.languages.registerCompletionItemProvider(lang, completion);
-                registeredLanguages.add(lang);
-            }
-        };
-
-        const setEditorSql = (sql) => {
-            if (editor) editor.setValue(sql);
-        };
-
-        const formatSql = () => {
-            if (!editor) return;
-            const fmt = window.sqlFormatter;
-            if (!fmt) {
-                notify('SQL 格式化库未加载', 'warning');
-                return;
-            }
-            if (typeof fmt.format !== 'function') {
-                notify('sqlFormatter 对象异常', 'error');
-                return;
-            }
-            const selection = editor.getSelection();
-            const hasSelection = selection && !selection.isEmpty();
-            const sql = hasSelection
-                ? editor.getModel().getValueInRange(selection)
-                : editor.getValue();
-            if (!sql.trim()) return;
-            const language = currentSource.value?.db_type === 'postgresql' ? 'postgresql' : 'mysql';
-            try {
-                const formatted = fmt.format(sql, { language });
-                if (hasSelection) {
-                    editor.executeEdits('format', [{ range: selection, text: formatted }]);
-                } else {
-                    const fullRange = editor.getModel().getFullModelRange();
-                    editor.executeEdits('format', [{ range: fullRange, text: formatted }]);
-                }
-                notify('格式化完成', 'success');
-            } catch (e) {
-                notify('格式化失败: ' + e.message, 'error');
-            }
-        };
-
-        const isRelationSuggestContext = () => {
-            if (!editor) return false;
-            const model = editor.getModel();
-            const position = editor.getPosition();
-            if (!model || !position) return false;
-            const line = model.getLineContent(position.lineNumber);
-            const textBeforeCursor = line.substring(0, position.column - 1);
-            return /(?:^|\s)(?:FROM|JOIN)\s+[`"]?[\w$]*$/i.test(textBeforeCursor);
-        };
-
-        const isSuggestDetailsVisible = () => {
-            const details = document.querySelector('.suggest-details:not(.no-docs)');
-            if (!details) return false;
-            const style = window.getComputedStyle(details);
-            return details.offsetParent !== null && style.display !== 'none' && style.visibility !== 'hidden';
-        };
-
-        const autoOpenSuggestDetails = () => {
-            if (!editor || !isRelationSuggestContext()) return;
-            const widget = document.querySelector('.suggest-widget.visible');
-            if (!widget || isSuggestDetailsVisible()) return;
-            try {
-                editor.trigger('auto-open-suggest-details', 'toggleSuggestionDetails', {});
-            } catch (e) {
-                console.debug('Unable to open suggestion details', e);
-            }
-        };
-
-        const scheduleSuggestDetails = () => {
-            if (suggestDetailsTimer) clearTimeout(suggestDetailsTimer);
-            suggestDetailsTimer = setTimeout(() => {
-                autoOpenSuggestDetails();
-                setTimeout(autoOpenSuggestDetails, 160);
-            }, 80);
-        };
-
         onMounted(() => {
             document.addEventListener('contextmenu', preventNativeContextMenu);
-            require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }});
-            require(['vs/editor/editor.main'], () => {
-                monaco.editor.defineTheme('dbdeck-dark', {
-                    base: 'vs-dark',
-                    inherit: true,
-                    rules: [],
-                    colors: {
-                        'editor.background': '#101820',
-                        'editor.foreground': '#d7dde5',
-                        'editorLineNumber.foreground': '#66717f',
-                        'editorCursor.foreground': '#5fb3ff',
-                        'editor.selectionBackground': '#26465f',
-                        'editor.lineHighlightBackground': '#172330',
-                    },
-                });
-                editor = monaco.editor.create(document.getElementById('monaco-editor'), {
-                    value: '',
-                    language: 'mysql',
-                    theme: 'dbdeck-dark',
-                    readOnly: isSqlEditorReadOnly.value,
-                    domReadOnly: isSqlEditorReadOnly.value,
-                    automaticLayout: true,
-                    minimap: { enabled: false },
-                    fontSize: 13,
-                    lineHeight: 20,
-                    scrollBeyondLastLine: false,
-                    tabSize: 4,
-                    renderLineHighlight: 'all',
-                    suggest: {
-                        showInlineDetails: true,
-                        showStatusBar: true,
-                        preview: true,
-                    },
-                });
-                editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-                    executeQuery();
-                });
-                editor.onDidChangeModelContent(() => {
-                    if (isApplyingScript) {
-                        scheduleSuggestDetails();
-                        return;
-                    }
-                    if (autoSaveTimer) clearTimeout(autoSaveTimer);
-                    const sourceId = currentSource.value?.id;
-                    const content = editor.getValue();
-                    autoSaveTimer = setTimeout(() => {
-                        if (sourceId) dbService.saveScript(sourceId, content);
-                    }, 2000);
-                    scheduleSuggestDetails();
-                });
-                editor.onDidChangeCursorPosition(scheduleSuggestDetails);
-                ensureCompletionRegistered();
-                if (currentSource.value) loadSourceScript(currentSource.value);
+            sqlEditor.mountEditor({
+                onExecute: () => executeQuery(),
+                onReady: () => {
+                    if (currentSource.value) sqlEditor.loadSourceScript(currentSource.value);
+                },
             });
             refreshTree();
             window.addEventListener('click', () => { contextMenu.show = false; });
@@ -1663,11 +1214,13 @@ const app = createApp({
             notify, showMessage, showConfirm,
             availableDatabases, isDiscovering,
             refreshTree, selectSource, toggleExpand, closeSource, saveSource, duplicateSource, deleteSource, editSource, openAddSource, testConnection, discoverDatabases, copyToClipboard,
-            viewData, copyInsert, copyInsertLabel, copySelect, executeQuery, executeAllSql, changeQueryPage, refreshQuery, askAI, exportChat, stopGeneration, clearChat, startResize, setEditorSql, formatSql,
+            viewData, copyInsert, copyInsertLabel, copySelect, executeQuery, executeAllSql, changeQueryPage, refreshQuery, startResize,
+            askAI: aiChat.askAI, exportChat: aiChat.exportChat, stopGeneration: aiChat.stopGeneration, clearChat: aiChat.clearChat,
+            setEditorSql: sqlEditor.setValue, formatSql: sqlEditor.formatSql,
             selectRedisKey, loadMetadata,
             workspaceTabs, activeWorkspaceTabId, activeWorkspaceTab, openTableTab, closeWorkspaceTab, closeOtherWorkspaceTabs,
             closeWorkspaceTabsToRight, closeAllWorkspaceTabs, hasWorkspaceTabsToRight, handleWorkspaceTabContextMenu, previewTableData,
-            showConfirmModal, confirmPayload, confirmApprove, confirmReject,
+            showConfirmModal, confirmPayload, confirmApprove: aiChat.confirmApprove, confirmReject: aiChat.confirmReject,
             activeTab,
             showImportModal, importSourceId, openImport,
 
