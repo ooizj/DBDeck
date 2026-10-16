@@ -200,10 +200,10 @@ dist/DBDeck.app
 脚本会自动创建虚拟环境、安装 `requirements-build.txt` 中的依赖并使用 PyInstaller 打包。产物位于：
 
 ```text
-dist\DBDeck\DBDeck.exe
+dist\DBDeck.exe
 ```
 
-Windows 使用 `onedir` 目录模式。发布时请压缩并分发整个 `dist\DBDeck` 目录，不能只复制其中的 `DBDeck.exe`。打包后的用户配置保存在 `%LOCALAPPDATA%\DBDeck\config.db`。
+Windows 使用 `onefile` 单文件模式，发布时直接分发 `dist\DBDeck.exe` 即可。打包后的用户配置保存在 `%LOCALAPPDATA%\DBDeck\config.db`。
 
 ## LLM 配置与本地存储
 

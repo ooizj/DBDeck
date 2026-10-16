@@ -20,7 +20,7 @@ echo [INFO] 开始打包 DBDeck...
 venv\Scripts\python.exe scripts\package_app.py || goto :error
 
 echo.
-echo [INFO] 打包完成：dist\DBDeck\DBDeck.exe
+echo [INFO] 打包完成：dist\DBDeck.exe
 pause
 exit /b 0
 
