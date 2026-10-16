@@ -139,7 +139,7 @@ export default {
             :model-value="show"
             @update:model-value="$emit('close')"
             title="结构比较"
-            width="1120px"
+            width="960px"
             destroy-on-close
             append-to-body
         >
@@ -155,14 +155,14 @@ export default {
                     <div class="form-row">
                         <div class="form-field">
                             <label>表 1</label>
-                            <el-select v-model="table1" placeholder="选择表" filterable style="width: 100%;">
+                            <el-select no-data-text="无数据" no-match-text="无匹配数据" v-model="table1" placeholder="选择表" filterable style="width: 100%;">
                                 <el-option v-for="t in tables" :key="t" :value="t" :label="t" />
                             </el-select>
                         </div>
 
                         <div class="form-field">
                             <label>表 2</label>
-                            <el-select v-model="table2" placeholder="选择表" filterable style="width: 100%;">
+                            <el-select no-data-text="无数据" no-match-text="无匹配数据" v-model="table2" placeholder="选择表" filterable style="width: 100%;">
                                 <el-option v-for="t in tables" :key="t" :value="t" :label="t" />
                             </el-select>
                         </div>

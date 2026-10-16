@@ -25,14 +25,18 @@ export default {
         }
     },
     watch: {
-        show(val) {
-            if (val) {
-                this.selectedTables = [...this.tables];
-                this.backupResult = null;
-                this.savedPath = '';
-                this.error = null;
-            }
-        }
+        // 弹框通过 v-if 挂载时 show 一开始就是 true，需要 immediate 才能默认全选
+        show: {
+            immediate: true,
+            handler(val) {
+                if (val) {
+                    this.selectedTables = [...this.tables];
+                    this.backupResult = null;
+                    this.savedPath = '';
+                    this.error = null;
+                }
+            },
+        },
     },
     methods: {
         toggleTable(table) {

@@ -82,11 +82,11 @@ export default {
 
     copyInsertLabel(table) {
         const type = keyType(table);
-        if (type === 'hash') return 'Copy HSET';
-        if (type === 'list') return 'Copy RPUSH';
-        if (type === 'set') return 'Copy SADD';
-        if (type === 'zset') return 'Copy ZADD';
-        return 'Copy SET';
+        if (type === 'hash') return '复制 HSET';
+        if (type === 'list') return '复制 RPUSH';
+        if (type === 'set') return '复制 SADD';
+        if (type === 'zset') return '复制 ZADD';
+        return '复制 SET';
     },
 
     buildInsertQuery(table, currentValue) {

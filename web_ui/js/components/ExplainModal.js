@@ -1,4 +1,42 @@
+// 执行计划节点（递归）：一行显示操作与对象，下方缩进显示子节点；点击行展开该节点的全部指标
+const PlanNode = {
+    name: 'PlanNode',
+    props: ['node', 'depth'],
+    data() {
+        return { showMetrics: false };
+    },
+    computed: {
+        summaryMetrics() {
+            return (this.node.metrics || []).filter(m => ['成本', '估算行数'].includes(m.key));
+        },
+        hasMetrics() {
+            return (this.node.metrics || []).length > 0;
+        },
+    },
+    template: `
+        <div class="plan-node">
+            <div :class="['plan-node-row', { clickable: hasMetrics, open: showMetrics }]" @click="hasMetrics && (showMetrics = !showMetrics)">
+                <span class="plan-node-label">{{ node.label }}</span>
+                <span v-if="node.detail" class="plan-node-detail">{{ node.detail }}</span>
+                <span class="plan-node-summary">
+                    <span v-for="m in summaryMetrics" :key="m.key">{{ m.key }} {{ m.value }}</span>
+                </span>
+            </div>
+            <dl v-if="showMetrics" class="plan-node-metrics">
+                <template v-for="m in node.metrics" :key="m.key">
+                    <dt>{{ m.key }}</dt>
+                    <dd>{{ m.value }}</dd>
+                </template>
+            </dl>
+            <div v-if="node.children && node.children.length" class="plan-node-children">
+                <plan-node v-for="(child, index) in node.children" :key="index" :node="child" :depth="depth + 1"></plan-node>
+            </div>
+        </div>
+    `,
+};
+
 export default {
+    components: { PlanNode },
     inject: ['dbService'],
     props: {
         show: { type: Boolean, default: false },
@@ -11,10 +49,26 @@ export default {
             planData: null,
             loading: false,
             error: null,
-            viewMode: 'tree', // tree, table, json
-            selectedNode: null,
-            zoom: 1
+            viewMode: 'tree',
         };
+    },
+    computed: {
+        views() {
+            if (!this.planData) return [];
+            const views = [];
+            if (this.planData.tree) views.push({ key: 'tree', label: '树形' });
+            if (this.planData.table?.columns?.length) views.push({ key: 'table', label: '表格' });
+            if (this.planData.raw !== null && this.planData.raw !== undefined) views.push({ key: 'raw', label: '原始' });
+            return views;
+        },
+        treeHasMetrics() {
+            const walk = node => Boolean(node) && ((node.metrics || []).length > 0 || (node.children || []).some(walk));
+            return walk(this.planData?.tree);
+        },
+        rawText() {
+            const raw = this.planData?.raw;
+            return typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
+        },
     },
     watch: {
         show(val) {
@@ -32,8 +86,7 @@ export default {
             this.error = null;
             this.planData = null;
 
-            // 超时兜底：无论后端是否阻塞，15 秒后一定结束 loading 并报错，
-            // 避免遮罩永久转圈、整页看起来"卡死"(#1)
+            // 超时兜底：无论后端是否阻塞，15 秒后一定结束 loading 并报错
             const timeout = new Promise((_, reject) =>
                 setTimeout(() => reject(new Error('分析超时（15 秒）。请检查数据库连接，或简化 SQL 后重试。')), 15000)
             );
@@ -44,6 +97,7 @@ export default {
                 ]);
                 if (result && result.success) {
                     this.planData = result;
+                    this.viewMode = this.views[0]?.key || 'tree';
                 } else {
                     this.error = (result && result.error) || '获取执行计划失败';
                 }
@@ -53,163 +107,63 @@ export default {
                 this.loading = false;
             }
         },
-        selectNode(node) {
-            this.selectedNode = node;
+        formatCell(value) {
+            if (value === null || value === undefined) return '';
+            return typeof value === 'object' ? JSON.stringify(value) : value;
         },
-        getOperationIcon(type) {
-            if (type === null || type === undefined || type === '') return '❓';
-            const t = String(type).toLowerCase();
-            if (t.includes('scan') || t.includes('seq')) return '📋';
-            if (t.includes('index')) return '📇';
-            if (t.includes('join')) return '🔗';
-            if (t.includes('sort')) return '↕️';
-            if (t.includes('filter')) return '🔍';
-            if (t.includes('hash')) return '#️⃣';
-            if (t.includes('merge')) return '🔀';
-            return '⚡';
+        formatMs(value) {
+            return typeof value === 'number' ? `${value.toFixed(2)} ms` : value;
         },
-        getCostClass(cost) {
-            if (!cost) return '';
-            if (cost < 100) return 'cost-low';
-            if (cost < 1000) return 'cost-medium';
-            return 'cost-high';
-        },
-        formatCost(cost) {
-            if (!cost) return '0';
-            if (cost < 1000) return cost.toFixed(1);
-            if (cost < 1000000) return (cost / 1000).toFixed(1) + 'K';
-            return (cost / 1000000).toFixed(1) + 'M';
-        },
-        zoomIn() {
-            this.zoom = Math.min(this.zoom + 0.1, 2);
-        },
-        zoomOut() {
-            this.zoom = Math.max(this.zoom - 0.1, 0.5);
-        },
-        resetZoom() {
-            this.zoom = 1;
-        }
     },
     template: `
         <el-dialog
             :model-value="show"
             @update:model-value="$emit('close')"
-            title="执行计划分析"
-            width="900px"
-            :close-on-click-modal="true"
+            title="执行计划"
+            width="1000px"
             destroy-on-close
             append-to-body
             class="explain-dialog"
         >
-            <template #header>
-                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-                    <span style="font-size: 16px; font-weight: 600;">执行计划分析</span>
-                    <div class="view-mode-tabs">
-                        <el-button :type="viewMode === 'tree' ? 'primary' : 'default'" size="small" @click="viewMode = 'tree'">树形</el-button>
-                        <el-button :type="viewMode === 'table' ? 'primary' : 'default'" size="small" @click="viewMode = 'table'">表格</el-button>
-                        <el-button :type="viewMode === 'json' ? 'primary' : 'default'" size="small" @click="viewMode = 'json'">JSON</el-button>
-                    </div>
-                </div>
-            </template>
+            <div class="explain-body">
+                <pre v-if="query" class="explain-query">{{ planData?.query || query }}</pre>
 
-            <div class="modal-body">
-                <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" style="margin-bottom: 12px;" />
+                <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
 
-                <div v-if="loading" style="text-align: center; padding: 40px 0; color: var(--el-text-color-regular);">
-                    <span class="spinner-small" style="display: inline-block; vertical-align: middle; margin-right: 8px;"></span>
-                    分析执行计划中…（可点击遮罩或下方"关闭"随时退出）
+                <div v-if="loading" class="explain-loading">
+                    <span class="spinner-small"></span>
+                    正在分析执行计划…
                 </div>
 
                 <template v-else-if="planData">
-                    <div class="plan-summary">
-                        <div class="summary-item" v-if="planData.planning_time">
-                            <span class="label">规划时间:</span>
-                            <span class="value">{{ planData.planning_time?.toFixed(2) }} ms</span>
-                        </div>
-                        <div class="summary-item" v-if="planData.execution_time">
-                            <span class="label">执行时间:</span>
-                            <span class="value">{{ planData.execution_time?.toFixed(2) }} ms</span>
-                        </div>
-                        <div class="summary-item" v-if="planData.provider">
-                            <span class="label">数据库:</span>
-                            <span class="value">{{ planData.provider }}</span>
-                        </div>
+                    <div class="explain-toolbar">
+                        <el-radio-group v-model="viewMode" size="small">
+                            <el-radio-button v-for="view in views" :key="view.key" :value="view.key">{{ view.label }}</el-radio-button>
+                        </el-radio-group>
+                        <span class="explain-meta">
+                            <span v-if="planData.planning_time != null">规划耗时 {{ formatMs(planData.planning_time) }}</span>
+                            <span v-if="viewMode === 'tree' && treeHasMetrics" class="muted">点击节点查看全部指标</span>
+                        </span>
                     </div>
 
-                    <div v-if="viewMode === 'tree'" class="plan-tree-container">
-                        <div class="tree-toolbar">
-                            <el-button size="small" @click="zoomOut" title="缩小">➖</el-button>
-                            <span class="zoom-level">{{ Math.round(zoom * 100) }}%</span>
-                            <el-button size="small" @click="zoomIn" title="放大">➕</el-button>
-                            <el-button size="small" @click="resetZoom" title="重置">↺</el-button>
-                        </div>
-                        <div class="plan-tree" :style="{ transform: 'scale(' + zoom + ')' }">
-                            <template v-if="planData.tree">
-                                <div class="tree-node root-node">
-                                    <div class="node-header" @click="selectNode(planData.tree)">
-                                        <span class="node-icon">{{ getOperationIcon(planData.tree.type) }}</span>
-                                        <span class="node-type">{{ planData.tree.type }}</span>
-                                        <span class="node-table" v-if="planData.tree.table">{{ planData.tree.table }}</span>
-                                        <span class="node-cost" :class="getCostClass(planData.tree.total_cost)">
-                                            {{ formatCost(planData.tree.total_cost) }}
-                                        </span>
-                                        <span class="node-rows">{{ planData.tree.rows }} 行</span>
-                                    </div>
-                                    <div v-if="planData.tree.children && planData.tree.children.length" class="node-children">
-                                        <div v-for="child in planData.tree.children" :key="child.type" class="child-node">
-                                            <div class="node-header" @click="selectNode(child)">
-                                                <span class="node-icon">{{ getOperationIcon(child.type) }}</span>
-                                                <span class="node-type">{{ child.type }}</span>
-                                                <span class="node-table" v-if="child.table || child.relation">{{ child.table || child.relation }}</span>
-                                                <span class="node-cost" :class="getCostClass(child.total_cost)">
-                                                    {{ formatCost(child.total_cost) }}
-                                                </span>
-                                                <span class="node-rows">{{ child.rows }} 行</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </template>
-
-                            <template v-else-if="planData.nodes">
-                                <div class="sqlite-plan">
-                                    <div v-for="node in planData.nodes" :key="node.id" class="plan-row">
-                                        <span class="row-id">{{ node.id }}</span>
-                                        <span class="row-detail">{{ node.detail }}</span>
-                                    </div>
-                                </div>
-                            </template>
-                        </div>
+                    <div v-if="viewMode === 'tree' && planData.tree" class="explain-view plan-tree-view">
+                        <plan-node :node="planData.tree" :depth="0"></plan-node>
                     </div>
 
-                    <div v-else-if="viewMode === 'table'" class="plan-table-container">
-                        <table v-if="planData.columns" class="plan-table">
+                    <div v-else-if="viewMode === 'table'" class="explain-view plan-table-view">
+                        <table class="plan-table">
                             <thead>
-                                <tr>
-                                    <th v-for="col in planData.columns" :key="col">{{ col }}</th>
-                                </tr>
+                                <tr><th v-for="col in planData.table.columns" :key="col">{{ col }}</th></tr>
                             </thead>
                             <tbody>
-                                <tr v-for="(row, idx) in planData.rows" :key="idx">
-                                    <td v-for="(cell, cellIdx) in row" :key="cellIdx">{{ cell }}</td>
+                                <tr v-for="(row, idx) in planData.table.rows" :key="idx">
+                                    <td v-for="(cell, cellIdx) in row" :key="cellIdx" :class="{ 'plan-cell-long': String(formatCell(cell)).length > 40 }">{{ formatCell(cell) }}</td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
 
-                    <div v-else-if="viewMode === 'json'" class="plan-json-container">
-                        <pre>{{ JSON.stringify(planData.raw || planData, null, 2) }}</pre>
-                    </div>
-
-                    <div v-if="selectedNode" class="node-details">
-                        <h4>节点详情</h4>
-                        <div class="detail-grid">
-                            <div v-for="(value, key) in selectedNode" :key="key" class="detail-item" v-if="key !== 'children'">
-                                <span class="detail-key">{{ key }}:</span>
-                                <span class="detail-value">{{ typeof value === 'object' ? JSON.stringify(value) : value }}</span>
-                            </div>
-                        </div>
-                    </div>
+                    <pre v-else-if="viewMode === 'raw'" class="explain-view plan-raw-view">{{ rawText }}</pre>
                 </template>
             </div>
 

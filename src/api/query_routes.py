@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter
 
-from src.api.schemas import SQLRequest
+from src.api.schemas import ExportQueryRequest, SQLRequest
 from src.services import query_service
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,11 @@ async def execute_sql(request: SQLRequest):
         page=request.page,
         page_size=request.page_size,
     )
+
+
+@router.post("/export-query")
+def export_query(request: ExportQueryRequest):
+    return query_service.export_query(request.query, request.source_id)
 
 
 @router.get("/metadata/ddl")

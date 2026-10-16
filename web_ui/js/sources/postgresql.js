@@ -15,7 +15,7 @@ export default {
     displayName: 'PostgreSQL',
     defaultPort: 5432,
     editorLanguage: 'mysql',
-    capabilities: { ddl: true, migrate: true, explain: true, backup: false, hasSchema: true },
+    capabilities: { ddl: true, migrate: false, explain: true, backup: false, hasSchema: true },
     childLabel: 'table',
     supportsCopyDDL: true,
 

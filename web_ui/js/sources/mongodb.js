@@ -77,7 +77,7 @@ export default {
     },
 
     copyInsertLabel() {
-        return 'Copy insertOne';
+        return '复制 insertOne';
     },
 
     buildInsertQuery(table, document = { field1: 'value1' }) {

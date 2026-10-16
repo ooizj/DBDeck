@@ -67,7 +67,7 @@ test('Redis tree copy builds SET with the current string value', () => {
         columns: [{ name: 'type', type: 'string' }],
     };
 
-    assert.equal(redisProvider.copyInsertLabel(table), 'Copy SET');
+    assert.equal(redisProvider.copyInsertLabel(table), '复制 SET');
     assert.equal(
         redisProvider.buildInsertQuery(table, '\u00002733299010872876841'),
         'SET 2733299010872876842_expireAccountId 2733299010872876841',
@@ -105,7 +105,7 @@ test('MongoDB tree copy uses escaped collection names and current documents', ()
     const table = { name: 'audit"events' };
     const document = { name: 'Ada', active: true };
 
-    assert.equal(mongodbProvider.copyInsertLabel(table), 'Copy insertOne');
+    assert.equal(mongodbProvider.copyInsertLabel(table), '复制 insertOne');
     assert.equal(
         mongodbProvider.buildInsertQuery(table, document),
         'db.getCollection("audit\\"events").insertOne({"name":"Ada","active":true})',

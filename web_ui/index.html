@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DBDeck</title>
     <link rel="stylesheet" href="vendor/element-plus.css?v=2">
-    <link rel="stylesheet" href="css/style.css?v=10">
+    <link rel="stylesheet" href="css/style.css?v=16">
     <script src="vendor/vue.global.prod.js"
             integrity="sha384-H2xBKUDQ/xne/c7DBZjrLhCc6tXYiUu5WAyegWsUsKWMopvozacrKINTNsuJHeFG"></script>
     <script src="vendor/element-plus.js?v=1"></script>
@@ -23,17 +23,16 @@
         <!-- 模态框组件 -->
         <modals 
             :show-add-modal="showAddModal" :is-editing="isEditing" :new-source="newSource" :is-testing="isTesting" :is-loading="isLoading"
+            :group-names="groupNames"
             :show-migrate-modal="showMigrateModal" :migrate-source-id="migrateSourceId" :migrate-dest-id="migrateDestId" 
-            :migrate-tables="migrateTables" :selected-migrate-tables="selectedMigrateTables" :sources="sources"
+            :migrate-tables="migrateTables" :selected-migrate-tables="selectedMigrateTables" :sources="migrateSources"
+            :migrate-tables-loading="migrateTablesLoading" :migrate-tables-error="migrateTablesError"
             :show-d-d-l-modal="showDDLModal" :ddl-table="ddlTable" :ddl-content="ddlContent"
             :show-config-modal="showConfigModal" :system-config="systemConfig"
             :available-databases="availableDatabases" :is-discovering="isDiscovering"
             :show-confirm-modal="showConfirmModal" :confirm-payload="confirmPayload"
-            :show-data-edit-modal="showDataEditModal" :data-edit-source-id="dataEditSourceId" :data-edit-table="dataEditTable"
-            :data-edit-mode="dataEditMode" :data-edit-data="dataEditData" :data-edit-columns="dataEditColumns" :data-edit-primary-key="dataEditPrimaryKey"
             :show-session-modal="showSessionModal" :session-source-id="sessionSourceId" :session-source-name="sessionSourceName"
             :show-backup-modal="showBackupModal" :backup-source-id="backupSourceId" :backup-source-name="backupSourceName" :backup-tables="backupTables"
-            :show-search-panel="showSearchPanel" :search-source-id="searchSourceId" :search-tables="searchTables"
             :show-explain-modal="showExplainModal" :explain-source-id="explainSourceId" :explain-query="explainQuery"
             :show-compare-modal="showCompareModal" :compare-source-id="compareSourceId" :compare-source-type="compareSourceType" :compare-tables="compareTables"
             @close-add="showAddModal = false; availableDatabases = []" @test-connection="testConnection" @save-source="saveSource"
@@ -46,10 +45,8 @@
             @import-dbeaver-config="importDbeaverConfig"
             @import-dbeaver-file="importDbeaverFile"
             @confirm-approve="confirmApprove" @confirm-reject="confirmReject"
-            @close-data-edit="showDataEditModal = false" @data-edit-saved="onDataEditSaved"
             @close-session="showSessionModal = false"
             @close-backup="showBackupModal = false"
-            @close-search="showSearchPanel = false" @select-search-result="onSelectSearchResult"
             @close-explain="showExplainModal = false"
             @close-compare="showCompareModal = false"
         ></modals>
@@ -57,21 +54,30 @@
         <!-- 自定义右键菜单 -->
         <div v-if="contextMenu.show" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click.stop>
             <template v-if="contextMenu.type === 'source'">
-                <div class="menu-item" @click="editSource(contextMenu.data)">Edit Connection</div>
+                <div class="menu-item" @click="editSource(contextMenu.data)">编辑连接</div>
                 <div class="menu-item" @click="duplicateSource(contextMenu.data)">复制连接</div>
+                <div class="menu-item" @click="toggleFavorite(contextMenu.data)">{{ contextMenu.data.is_favorite ? '取消收藏' : '收藏' }}</div>
+                <div class="menu-item" @click="moveSourceToGroup(contextMenu.data)">移动到分组…</div>
                 <div class="menu-separator"></div>
-                <div class="menu-item" @click="openImport(contextMenu.data.id)">导入数据</div>
+                <div v-if="supportsImport(contextMenu.data)" class="menu-item" @click="openImport(contextMenu.data.id)">导入数据</div>
                 <div v-if="supportsBackup(contextMenu.data)" class="menu-item" @click="openBackup(contextMenu.data.id, contextMenu.data.name)">备份数据库</div>
-                <div class="menu-item" @click="openSessionManager(contextMenu.data.id, contextMenu.data.name)">会话管理</div>
+                <div v-if="supportsSessions(contextMenu.data)" class="menu-item" @click="openSessionManager(contextMenu.data.id, contextMenu.data.name)">会话管理</div>
+                <template v-if="currentSource?.id === contextMenu.data.id">
+                    <div class="menu-separator"></div>
+                    <div class="menu-item" @click="refreshSource(contextMenu.data)">刷新</div>
+                    <div class="menu-item" @click="closeSource(contextMenu.data)">断开连接</div>
+                </template>
                 <div class="menu-separator"></div>
-                <div class="menu-item" @click="refreshTree">Refresh</div>
-                <div class="menu-item" @click="closeSource(contextMenu.data)">Disconnect</div>
-                <div class="menu-item" @click="deleteSource(contextMenu.data)" style="color: #ff4d4f;">Delete</div>
+                <div class="menu-item danger" @click="deleteSource(contextMenu.data)">删除连接</div>
+            </template>
+            <template v-if="contextMenu.type === 'group'">
+                <div class="menu-item" @click="renameGroup(contextMenu.data)">重命名分组</div>
+                <div class="menu-item danger" @click="ungroupGroup(contextMenu.data)">解散分组</div>
             </template>
             <template v-if="contextMenu.type === 'table'">
-                <div class="menu-item" @click="viewData(contextMenu.data)">View Data</div>
+                <div class="menu-item" @click="viewData(contextMenu.data)">查看数据</div>
                 <div class="menu-separator"></div>
-                <div class="menu-item" @click="copySelect(contextMenu.data)">Copy SELECT</div>
+                <div class="menu-item" @click="copySelect(contextMenu.data)">复制 SELECT</div>
                 <div class="menu-item" @click="copyInsert(contextMenu.data)">{{ copyInsertLabel(contextMenu.data) }}</div>
             </template>
             <template v-if="contextMenu.type === 'workspace-tab'">
@@ -95,9 +101,6 @@
                 </el-button>
                 <el-button @click="openCompareTool" title="比较结构">
                     <span class="tool-icon">≋</span><span>比较结构</span>
-                </el-button>
-                <el-button @click="refreshTree" title="刷新导航器">
-                    <span class="tool-icon">↻</span><span>刷新</span>
                 </el-button>
                 <el-button @click="openSettings" title="系统设置">
                     <span class="tool-icon">⚙</span><span>设置</span>
@@ -130,7 +133,7 @@
                     v-model:redis-key-pattern="redisKeyPattern"
                     :redis-toolbar-loading="redisToolbarLoading"
                     :selected-redis-key-name="selectedRedisKeyName"
-                    @select-source="selectSource" @toggle-expand="toggleExpand" @refresh-node="loadMetadata"
+                    @activate-source="activateSource" @toggle-expand="toggleExpand" @collapse-all="collapseAll"
                     @open-add="openAddSource"
                     @context-menu="handleContextMenu" @view-data="viewData" @open-table="openTableTab"
                     @search-redis-keys="searchRedisKeys"
@@ -160,7 +163,7 @@
                              @contextmenu.prevent="handleWorkspaceTabContextMenu($event, tab)">
                             <span class="tab-dot" :class="{ table: tab.type === 'table' }"></span>
                             <span>{{ tab.title }}</span>
-                            <small>{{ tab.subtitle || (currentProvider ? currentProvider.displayName : 'No source') }}</small>
+                            <small>{{ tab.subtitle || (currentProvider ? currentProvider.displayName : '未连接') }}</small>
                             <button v-if="tab.id !== 'sql-console'" class="tab-close-btn" @click.stop="closeWorkspaceTab(tab)">×</button>
                         </div>
                     </div>
@@ -169,8 +172,9 @@
                             <sql-editor
                                 :current-source="currentSource" :editor-height="editorHeight"
                                 :disabled="isSqlEditorReadOnly"
-                                @execute="executeQuery()" @execute-all="executeAllSql"
-                                @format="formatSql"
+                                :can-explain="Boolean(currentProvider?.capabilities?.explain)"
+                                @execute="executeQuery()"
+                                @format="formatSql" @explain="openExplainPlan"
                             ></sql-editor>
 
                             <div class="resizer-v" @mousedown="startResize('editor')"></div>
@@ -178,18 +182,23 @@
                             <result-area
                                 :query-result="queryResult"
                                 :pagination="queryResult.pagination"
+                                :export-all="exportAllSpec"
                                 @page-change="changeQueryPage"
                                 @copy="copyToClipboard"
                                 @refresh="refreshQuery"
                             ></result-area>
                         </div>
-                        <table-object-view
-                            v-if="activeWorkspaceTab?.type === 'table'"
-                            :source="activeWorkspaceTab.source"
-                            :table="activeWorkspaceTab.table"
-                            :initial-pane="activeWorkspaceTab.pane"
-                            @copy="copyToClipboard"
-                        ></table-object-view>
+                        <!-- 每个表标签各自一个视图并保持存活，切换标签不会重新查询 -->
+                        <template v-for="tab in workspaceTabs" :key="tab.id">
+                            <table-object-view
+                                v-if="tab.type === 'table'"
+                                v-show="activeWorkspaceTabId === tab.id"
+                                :source="tab.source"
+                                :table="tab.table"
+                                :initial-pane="tab.pane"
+                                @copy="copyToClipboard"
+                            ></table-object-view>
+                        </template>
                     </div>
                 </div>
             </div>
@@ -203,8 +212,8 @@
             ></ai-panel>
         </div>
         <div class="statusbar">
-            <span>{{ queryResult.isRunning ? 'Running' : 'Ready' }}</span>
-            <span v-if="queryResult.executedSql">Rows: {{ queryResult.rowCount }} · Time: {{ queryResult.time }}s</span>
+            <span>{{ queryResult.isRunning ? '执行中' : '就绪' }}</span>
+            <span v-if="queryResult.executedSql">行数: {{ queryResult.rowCount }} · 耗时: {{ queryResult.time }}s</span>
             <span v-if="currentSource">{{ currentSource.db_type }} · {{ currentSource.database }}</span>
             <span v-else>选择左侧连接开始工作</span>
             <span>自动预览最多 100 行</span>
@@ -218,6 +227,6 @@
         ></import-panel>
     </div>
 
-    <script type="module" src="js/app.js?v=refactor-20260729a"></script>
+    <script type="module" src="js/app.js?v=ui-fixes-20261016b"></script>
 </body>
 </html>

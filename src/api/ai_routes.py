@@ -15,7 +15,6 @@ async def chat(request: QueryRequest):
         ai_service.chat_events(
             request.query,
             source_id=request.source_id,
-            workspace_id=request.workspace_id,
             session_id=request.session_id,
         ),
         media_type="application/x-ndjson",

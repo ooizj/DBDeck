@@ -1,8 +1,8 @@
 import { dbService } from './api.js';
-import SourceTree from './components/SourceTree.js?v=nav-20260702a';
-import SqlEditor from './components/SqlEditor.js?v=sql-editor-20260729a';
-import ResultArea from './components/ResultArea.js?v=result-20260702f';
-import TableObjectView from './components/TableObjectView.js?v=object-20260701b';
+import SourceTree from './components/SourceTree.js?v=nav-groups-20261016';
+import SqlEditor from './components/SqlEditor.js?v=sql-editor-20261016';
+import ResultArea from './components/ResultArea.js?v=result-20261016c';
+import TableObjectView from './components/TableObjectView.js?v=object-20261016';
 import AiPanel from './components/AiPanel.js';
 import Modals from './components/Modals.js';
 import HistoryPanel from './components/HistoryPanel.js';
@@ -24,6 +24,19 @@ const app = createApp({
     components: { SourceTree, SqlEditor, ResultArea, TableObjectView, AiPanel, Modals, HistoryPanel, ImportPanel },
     setup() {
         const preventNativeContextMenu = event => event.preventDefault();
+        // 弹框内的表格单元格：双击/三击只选中该单元格的内容。
+        // WebKit 中双击单元格末尾时，原生选区会一直延伸到弹框底部甚至遮罩层。
+        const DIALOG_CELL_SELECTOR = '.el-overlay td, .el-overlay th, .el-overlay dd, .el-overlay dt, .el-overlay .plan-node-label, .el-overlay .plan-node-detail';
+        const selectDialogCell = (event) => {
+            if (event.detail < 2) return;
+            const cell = event.target?.closest?.(DIALOG_CELL_SELECTOR);
+            if (!cell) return;
+            const selection = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(cell);
+            selection.removeAllRanges();
+            selection.addRange(range);
+        };
         const tree = ref([]);
         const sources = ref([]);
         const currentSource = ref(null);
@@ -33,54 +46,12 @@ const app = createApp({
         );
         const currentTables = ref([]);
         const expandedIds = ref([]);
-        const workspaceTabs = ref([{ id: 'sql-console', type: 'sql', title: 'SQL Console' }]);
+        const workspaceTabs = ref([{ id: 'sql-console', type: 'sql', title: 'SQL 控制台' }]);
         const activeWorkspaceTabId = ref('sql-console');
         const activeWorkspaceTab = computed(() => workspaceTabs.value.find(tab => tab.id === activeWorkspaceTabId.value) || workspaceTabs.value[0]);
 
         // 左侧栏 tab 状态（database / history）
         const activeTab = ref('database');
-        const editorMode = ref('sql'); // 仅 SQL 控制台（文件编辑器已移除）
-
-        // ========== 数据编辑功能 ==========
-        const showDataEditModal = ref(false);
-        const dataEditSourceId = ref(null);
-        const dataEditTable = ref('');
-        const dataEditMode = ref('insert');
-        const dataEditData = ref(null);
-        const dataEditColumns = ref([]);
-        const dataEditPrimaryKey = ref(null);
-
-        const openDataEdit = async (sourceId, table, mode = 'insert', editData = null) => {
-            contextMenu.show = false;
-            dataEditSourceId.value = sourceId;
-            dataEditTable.value = table;
-            dataEditMode.value = mode;
-            dataEditData.value = editData;
-            
-            // 获取列信息
-            try {
-                const colResult = await dbService.getTableColumns(sourceId, table);
-                if (colResult.success) {
-                    dataEditColumns.value = colResult.columns || [];
-                }
-                const pkResult = await dbService.getPrimaryKey(sourceId, table);
-                if (pkResult.success) {
-                    dataEditPrimaryKey.value = pkResult.primary_key;
-                }
-            } catch (e) {
-                console.error('Failed to get column info', e);
-            }
-            
-            showDataEditModal.value = true;
-        };
-
-        const onDataEditSaved = async () => {
-            notify('数据已保存', 'success');
-            // 刷新当前表数据
-            if (currentSource.value && dataEditTable.value) {
-                await viewData({ source_id: currentSource.value.id, name: dataEditTable.value });
-            }
-        };
 
         // ========== 会话管理功能 ==========
         const showSessionModal = ref(false);
@@ -118,37 +89,15 @@ const app = createApp({
             try {
                 const res = await dbService.getMetadata(sourceId);
                 if (res.success) {
-                    backupTables.value = Object.keys(res.tables || {});
+                    const objectTypes = res.object_types || {};
+                    backupTables.value = Object.keys(res.tables || {})
+                        .filter(name => (objectTypes[name] || 'table') === 'table');
                 }
             } catch (e) {
                 console.error('Failed to get tables', e);
             }
             
             showBackupModal.value = true;
-        };
-
-        // ========== 搜索功能 ==========
-        const showSearchPanel = ref(false);
-        const searchSourceId = ref(null);
-        const searchTables = ref([]);
-
-        const openSearchPanel = () => {
-            if (currentSource.value) {
-                searchSourceId.value = currentSource.value.id;
-                searchTables.value = currentTables.value.map(t => t.name);
-            }
-            showSearchPanel.value = true;
-        };
-
-        const onSelectSearchResult = (result) => {
-            // 处理搜索结果选择
-            if (result.type === 'table') {
-                // 如果选择了表，在编辑器中生成查询
-                sqlEditor.setValue(`SELECT * FROM ${result.name} LIMIT 100;`);
-            } else if (result.table) {
-                // 如果选择了数据，打开表数据
-                viewData({ source_id: searchSourceId.value, name: result.table });
-            }
         };
 
         // ========== 执行计划功能 ==========
@@ -162,7 +111,7 @@ const app = createApp({
                 return;
             }
             
-            const query = sqlEditor.getValue().trim();
+            const query = sqlEditor.getSelectedOrCurrentSql().trim();
             if (!query) {
                 notify('请输入要分析的SQL', 'warning');
                 return;
@@ -180,15 +129,20 @@ const app = createApp({
         const compareTables = ref([]);
 
         const openCompareTool = () => {
-            if (currentSource.value) {
-                if (currentSource.value.db_type === 'mongodb') {
-                    notify('MongoDB 暂不支持结构比较', 'warning');
-                    return;
-                }
-                compareSourceId.value = currentSource.value.id;
-                compareSourceType.value = currentSource.value.db_type;
-                compareTables.value = currentTables.value.map(t => t.name);
+            const source = currentSource.value;
+            if (!source) {
+                notify('请先在左侧选择一个连接，再比较其中两张表的结构', 'warning');
+                return;
             }
+            if (!['mysql', 'postgresql', 'sqlite'].includes(source.db_type)) {
+                notify(`${getProvider(source.db_type).displayName} 不支持结构比较`, 'warning');
+                return;
+            }
+            compareSourceId.value = source.id;
+            compareSourceType.value = source.db_type;
+            compareTables.value = currentTables.value
+                .filter(t => (t.object_type || 'table') === 'table' || t.object_type === 'view')
+                .map(t => t.name);
             showCompareModal.value = true;
         };
 
@@ -268,7 +222,7 @@ const app = createApp({
         const isDiscovering = ref(false);
         const availableDatabases = ref([]);
 
-        const { notify, showMessage, showConfirm } = useNotifications();
+        const { notify, showMessage, showConfirm, showPrompt } = useNotifications();
         // 通过 provide/inject 向所有子组件（含 el-dialog append-to-body 弹窗）提供 dbService，
         // 替代原先的 window.dbService 全局挂载。
         provide('dbService', dbService);
@@ -306,7 +260,6 @@ const app = createApp({
         const queryHistory = useQueryHistory({
             dbService,
             getEditor,
-            getEditorMode: () => editorMode,
             getActiveTab: () => activeTab,
             showMessage, showConfirm, notify,
         });
@@ -321,7 +274,8 @@ const app = createApp({
         const migration = useMigration({
             dbService,
             getTree: () => tree.value,
-            showMessage,
+            getProvider,
+            showMessage, showConfirm,
             isLoading,
         });
 
@@ -364,7 +318,8 @@ const app = createApp({
             contextMenu.y = Math.max(contextMenuViewportMargin, Math.min(preferredY, maxY));
         };
 
-        const refreshTree = async () => {
+        // reloadMetadata=false 用于收藏、分组等只影响导航展示的操作，避免重新拉取已展开连接的表结构
+        const refreshTree = async ({ reloadMetadata = true } = {}) => {
             contextMenu.show = false;
             isLoading.value = true;
             try {
@@ -402,6 +357,7 @@ const app = createApp({
 
                 // 重新加载当前已展开的数据源的元数据，以刷新表结构
                 const refreshPromises = [];
+                if (!reloadMetadata) return;
                 for (const s of tree.value) {
                     if (s.type === 'source' && expandedIds.value.includes(s.id)) {
                         refreshPromises.push(loadMetadata(s));
@@ -490,7 +446,6 @@ const app = createApp({
                     if (!source.children || source.children.length === 0) {
                         await loadMetadata(source);
                     }
-                    editorMode.value = 'sql';
                     if (getEditor() && !sqlEditor.getValue()) await sqlEditor.loadSourceScript(source);
                     return;
                 }
@@ -503,7 +458,6 @@ const app = createApp({
                 expandedIds.value = [source.id];
                 currentSource.value = source;
                 currentTables.value = source.children || [];
-                editorMode.value = 'sql';
                 resetQueryResult();
 
                 if (!source.children || source.children.length === 0) {
@@ -515,8 +469,10 @@ const app = createApp({
             }
         };
 
+        // 展开箭头：非当前连接 → 切换过去并展开；当前连接 → 展开/折叠
         const toggleExpand = async (source) => {
             if (currentSource.value?.id !== source.id) {
+                await selectSource(source);
                 return;
             }
             const index = expandedIds.value.indexOf(source.id);
@@ -530,6 +486,84 @@ const app = createApp({
             }
         };
 
+        // 单击连接行：非当前连接 → 切换过去并展开；当前连接 → 若已折叠则展开（不会因双击而反复折叠）
+        const activateSource = async (source) => {
+            if (currentSource.value?.id !== source.id) {
+                await selectSource(source);
+                return;
+            }
+            if (!expandedIds.value.includes(source.id)) await toggleExpand(source);
+        };
+
+        const collapseAll = () => {
+            expandedIds.value = [];
+        };
+
+        const refreshSource = async (source) => {
+            contextMenu.show = false;
+            await loadMetadata(source);
+        };
+
+        const supportsSessions = source => ['mysql', 'postgresql'].includes(source?.db_type);
+        const supportsImport = source => ['mysql', 'postgresql', 'sqlite'].includes(source?.db_type);
+
+        const groupNames = computed(() => [...new Set(
+            tree.value.map(source => source.group_name).filter(Boolean)
+        )].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })));
+
+        const toggleFavorite = async (source) => {
+            contextMenu.show = false;
+            try {
+                const res = await dbService.toggleFavorite(source.id);
+                if (!res.success) throw new Error(res.error || '未知错误');
+                source.is_favorite = res.is_favorite;
+            } catch (e) {
+                showMessage('操作失败: ' + e.message, '错误', 'error');
+            }
+        };
+
+        const moveSourceToGroup = async (source) => {
+            contextMenu.show = false;
+            const hint = groupNames.value.length ? `已有分组：${groupNames.value.join('、')}` : '输入新分组名称';
+            const name = await showPrompt(`${hint}。留空则移出分组。`, `移动「${source.name}」到分组`, {
+                inputValue: source.group_name || '',
+                placeholder: '例如：生产 / 测试 / 项目名',
+            });
+            if (name === null) return;
+            try {
+                const res = await dbService.setSourceGroup(source.id, name.trim());
+                if (!res.success) throw new Error(res.error || '未知错误');
+                await refreshTree({ reloadMetadata: false });
+            } catch (e) {
+                showMessage('移动分组失败: ' + e.message, '错误', 'error');
+            }
+        };
+
+        const renameGroup = async (group) => {
+            contextMenu.show = false;
+            const name = await showPrompt('新的分组名称（与已有分组同名时会合并）', '重命名分组', { inputValue: group.name });
+            if (name === null || !name.trim() || name.trim() === group.name) return;
+            try {
+                const res = await dbService.renameGroup(group.id, name.trim());
+                if (!res.success) throw new Error(res.error || '未知错误');
+                await refreshTree({ reloadMetadata: false });
+            } catch (e) {
+                showMessage('重命名分组失败: ' + e.message, '错误', 'error');
+            }
+        };
+
+        const ungroupGroup = async (group) => {
+            contextMenu.show = false;
+            if (!await showConfirm(`解散分组「${group.name}」？其中的连接会移到未分组，不会删除连接。`)) return;
+            try {
+                const res = await dbService.ungroup(group.id);
+                if (!res.success) throw new Error(res.error || '未知错误');
+                await refreshTree({ reloadMetadata: false });
+            } catch (e) {
+                showMessage('解散分组失败: ' + e.message, '错误', 'error');
+            }
+        };
+
         const closeSource = async (source) => {
             const index = expandedIds.value.indexOf(source.id);
             if (index > -1) expandedIds.value.splice(index, 1);
@@ -539,7 +573,6 @@ const app = createApp({
                 await sqlEditor.saveCurrentSourceScript();
                 currentSource.value = null;
                 currentTables.value = [];
-                editorMode.value = 'sql';
                 resetQueryResult();
             }
             await disconnectSourceRuntime(source, { clearScript: wasCurrentSource });
@@ -631,7 +664,6 @@ const app = createApp({
                         currentSource.value = null;
                         currentTables.value = [];
                         expandedIds.value = expandedIds.value.filter(id => id !== source.id);
-                        editorMode.value = 'sql';
                         sqlEditor.setValue('');
                         resetQueryResult();
                         if (source.db_type === 'redis') redis.resetRedisNavigator(source);
@@ -881,6 +913,14 @@ const app = createApp({
                 previewTableData(tablePayload);
                 return;
             }
+            const id = `table:${source.id}:${tablePayload.name}`;
+            const existing = workspaceTabs.value.find(tab => tab.id === id);
+            if (existing) {
+                // 已打开的表只切换面板；不替换 table 对象、不再查询，避免视图重新加载
+                existing.pane = pane;
+                activeWorkspaceTabId.value = id;
+                return;
+            }
             try {
                 const pkResult = await dbService.getPrimaryKey(source.id, tablePayload.name);
                 if (pkResult?.success) {
@@ -889,9 +929,7 @@ const app = createApp({
             } catch (e) {
                 console.debug('Failed to enrich primary key metadata', e);
             }
-            const id = `table:${source.id}:${tablePayload.name}`;
-            const existing = workspaceTabs.value.find(tab => tab.id === id);
-            if (!existing) {
+            if (!workspaceTabs.value.some(tab => tab.id === id)) {
                 workspaceTabs.value.push({
                     id,
                     type: 'table',
@@ -901,10 +939,6 @@ const app = createApp({
                     table: tablePayload,
                     pane,
                 });
-            } else {
-                existing.table = tablePayload;
-                existing.source = source;
-                existing.pane = pane;
             }
             activeWorkspaceTabId.value = id;
         };
@@ -970,7 +1004,7 @@ const app = createApp({
         };
 
         const copyInsertLabel = (table) => (
-            contextMenu.provider?.copyInsertLabel?.(table) || 'Copy INSERT'
+            contextMenu.provider?.copyInsertLabel?.(table) || '复制 INSERT'
         );
 
         const copyInsert = async (table) => {
@@ -1142,6 +1176,12 @@ const app = createApp({
             }
         };
 
+        // 分页结果（单条只读 SELECT）才允许"导出全部"：后端会不分页重新执行 requestedSql
+        const exportAllSpec = computed(() => {
+            if (!queryResult.pagination || !currentSource.value || !queryResult.requestedSql) return null;
+            return { sourceId: currentSource.value.id, query: queryResult.requestedSql };
+        });
+
         const changeQueryPage = (delta) => {
             const pagination = queryResult.pagination;
             if (!pagination || queryResult.isRunning) return;
@@ -1160,11 +1200,6 @@ const app = createApp({
                 pageSize: queryResult.pagination?.pageSize || 100,
                 editableContext: queryResult.editable,
             });
-        };
-
-        const executeAllSql = () => {
-            if (!getEditor() || !currentSource.value) return;
-            executeQuery(sqlEditor.getValue());
         };
 
         const startResize = (type) => {
@@ -1190,6 +1225,8 @@ const app = createApp({
 
         onMounted(() => {
             document.addEventListener('contextmenu', preventNativeContextMenu);
+            document.addEventListener('click', selectDialogCell);
+            document.addEventListener('dblclick', selectDialogCell);
             sqlEditor.mountEditor({
                 onExecute: () => executeQuery(),
                 onReady: () => {
@@ -1202,6 +1239,8 @@ const app = createApp({
 
         onBeforeUnmount(() => {
             document.removeEventListener('contextmenu', preventNativeContextMenu);
+            document.removeEventListener('click', selectDialogCell);
+            document.removeEventListener('dblclick', selectDialogCell);
         });
 
         return {
@@ -1213,8 +1252,9 @@ const app = createApp({
             sources,
             notify, showMessage, showConfirm,
             availableDatabases, isDiscovering,
-            refreshTree, selectSource, toggleExpand, closeSource, saveSource, duplicateSource, deleteSource, editSource, openAddSource, testConnection, discoverDatabases, copyToClipboard,
-            viewData, copyInsert, copyInsertLabel, copySelect, executeQuery, executeAllSql, changeQueryPage, refreshQuery, startResize,
+            refreshTree, selectSource, toggleExpand, activateSource, collapseAll, refreshSource, closeSource,
+            supportsSessions, supportsImport, groupNames, toggleFavorite, moveSourceToGroup, renameGroup, ungroupGroup, saveSource, duplicateSource, deleteSource, editSource, openAddSource, testConnection, discoverDatabases, copyToClipboard,
+            viewData, copyInsert, copyInsertLabel, copySelect, executeQuery, exportAllSpec, changeQueryPage, refreshQuery, startResize,
             askAI: aiChat.askAI, exportChat: aiChat.exportChat, stopGeneration: aiChat.stopGeneration, clearChat: aiChat.clearChat,
             setEditorSql: sqlEditor.setValue, formatSql: sqlEditor.formatSql,
             selectRedisKey, loadMetadata,
@@ -1224,10 +1264,6 @@ const app = createApp({
             activeTab,
             showImportModal, importSourceId, openImport,
 
-            // 数据编辑功能
-            showDataEditModal, dataEditSourceId, dataEditTable, dataEditMode, dataEditData, dataEditColumns, dataEditPrimaryKey,
-            openDataEdit, onDataEditSaved,
-
             // 会话管理功能
             showSessionModal, sessionSourceId, sessionSourceName,
             openSessionManager,
@@ -1235,10 +1271,6 @@ const app = createApp({
             // 备份功能
             showBackupModal, backupSourceId, backupSourceName, backupTables,
             openBackup, supportsBackup,
-
-            // 搜索功能
-            showSearchPanel, searchSourceId, searchTables,
-            openSearchPanel, onSelectSearchResult,
 
             // 执行计划功能
             showExplainModal, explainSourceId, explainQuery,
@@ -1284,6 +1316,9 @@ const app = createApp({
             migrateDestId: migration.migrateDestId,
             migrateTables: migration.migrateTables,
             selectedMigrateTables: migration.selectedMigrateTables,
+            migrateSources: migration.migrateSources,
+            migrateTablesLoading: migration.migrateTablesLoading,
+            migrateTablesError: migration.migrateTablesError,
             handleMigrateSourceChange: migration.handleMigrateSourceChange,
             doMigrate: migration.doMigrate,
 

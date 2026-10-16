@@ -26,9 +26,13 @@ class ConnectionManager:
         self._lock = threading.RLock()
         self._clients: Dict[int, Tuple[str, DataSourceClient]] = {}
 
-    @staticmethod
-    def _signature(source: Dict[str, Any]) -> str:
-        return json.dumps(source, sort_keys=True, default=str)
+    # 只影响导航展示、不影响连接的字段；变更时不应触发重连
+    _NON_CONNECTION_FIELDS = frozenset({"name", "group_id", "group_name", "is_favorite", "created_at"})
+
+    @classmethod
+    def _signature(cls, source: Dict[str, Any]) -> str:
+        relevant = {k: v for k, v in source.items() if k not in cls._NON_CONNECTION_FIELDS}
+        return json.dumps(relevant, sort_keys=True, default=str)
 
     def get(
         self,

@@ -45,10 +45,9 @@ export default {
             dataCountLoading: false,
             result: emptyResult(),
             ddl: '',
+            ddlError: '',
+            ddlHtml: '',
             ddlLoading: false,
-            planLoading: false,
-            planError: '',
-            planData: null,
         };
     },
     computed: {
@@ -68,9 +67,18 @@ export default {
         tableNameSql() {
             return quoteIdent(this.source.db_type, this.table.name);
         },
+        // DDL 统一以分号结尾，复制后可直接执行
+        ddlText() {
+            const ddl = String(this.ddl || '').trimEnd();
+            if (!ddl) return '';
+            return ddl.endsWith(';') ? ddl : ddl + ';';
+        },
         dataSql() {
             const offset = (this.dataPage - 1) * this.dataPageSize;
             return `SELECT * FROM ${this.tableNameSql} LIMIT ${this.dataPageSize} OFFSET ${offset}`;
+        },
+        exportAllSpec() {
+            return { sourceId: this.source.id, query: `SELECT * FROM ${this.tableNameSql}` };
         },
         countSql() {
             return `SELECT COUNT(*) AS total FROM ${this.tableNameSql}`;
@@ -97,8 +105,6 @@ export default {
                 this.primaryKeyColumns = [];
                 this.primaryKeyLoaded = false;
                 this.result = emptyResult();
-                this.planData = null;
-                this.planError = '';
                 this.loadDdl();
                 this.loadPrimaryKey();
                 this.$nextTick(() => {
@@ -152,14 +158,38 @@ export default {
             if (!this.source?.id || !this.table?.name) return;
             this.ddlLoading = true;
             this.ddl = '';
+            this.ddlError = '';
+            this.ddlHtml = '';
             try {
                 const res = await this.dbService.getDDL(this.table.name, this.source.id);
-                this.ddl = res.success ? (res.ddl || '') : (res.error || '');
+                if (res.success) this.ddl = res.ddl || '';
+                else this.ddlError = res.error || '获取 DDL 失败';
             } catch (e) {
-                this.ddl = e.message || '获取 DDL 失败';
+                this.ddlError = e.message || '获取 DDL 失败';
             } finally {
                 this.ddlLoading = false;
             }
+            await this.highlightDdl();
+        },
+        // 用 Monaco 的 colorize 做语法高亮（输出已转义 HTML）；Monaco 未加载或失败时退回纯文本
+        async highlightDdl() {
+            const text = this.ddlText;
+            if (!text || typeof monaco === 'undefined' || !monaco.editor?.colorize) return;
+            const language = this.source?.db_type === 'postgresql' ? 'pgsql' : 'mysql';
+            try {
+                const html = await monaco.editor.colorize(text, language, { tabSize: 4 });
+                if (text === this.ddlText) this.ddlHtml = html;
+            } catch (e) {
+                this.ddlHtml = '';
+            }
+        },
+        copyDdl() {
+            if (this.ddlText) this.$emit('copy', this.ddlText);
+        },
+        refreshInfo() {
+            this.loadDdl();
+            this.primaryKeyLoaded = false;
+            this.loadPrimaryKey();
         },
         async loadCount() {
             this.dataCountLoading = true;
@@ -230,20 +260,6 @@ export default {
             this.dataPage = next;
             this.loadData();
         },
-        async loadPlan() {
-            this.planLoading = true;
-            this.planError = '';
-            this.planData = null;
-            try {
-                const res = await this.dbService.getVisualPlan(this.source.id, this.dataSql);
-                if (res.success) this.planData = res;
-                else this.planError = res.error || '获取执行计划失败';
-            } catch (e) {
-                this.planError = e.message || '获取执行计划失败';
-            } finally {
-                this.planLoading = false;
-            }
-        },
     },
     template: `
         <div class="table-object-view">
@@ -254,8 +270,8 @@ export default {
                     <small v-if="table.comment">{{ table.comment }}</small>
                 </div>
                 <div class="table-object-meta">
-                    <span>{{ columns.length }} columns</span>
-                    <span v-if="pkColumns.length">pk: {{ pkColumns.join(', ') }}</span>
+                    <span>{{ columns.length }} 列</span>
+                    <span v-if="pkColumns.length">主键：{{ pkColumns.join(', ') }}</span>
                     <span>{{ source.name }} / {{ source.database }}</span>
                 </div>
             </div>
@@ -268,25 +284,36 @@ export default {
             <div v-if="activePane === 'info'" class="object-pane info-pane">
                 <div class="table-info-grid">
                     <section>
-                        <div class="section-title">字段</div>
+                        <div class="section-head">
+                            <div class="section-title">字段</div>
+                            <button class="section-action" @click="refreshInfo" title="重新读取主键和 DDL">刷新</button>
+                        </div>
                         <table class="object-meta-table">
                             <thead>
-                                <tr><th>字段</th><th>注释</th><th>类型</th><th>主键</th><th>可空</th></tr>
+                                <tr><th class="col-index">#</th><th>字段</th><th>类型</th><th class="col-flag">可空</th><th class="col-flag">主键</th><th>注释</th></tr>
                             </thead>
                             <tbody>
-                                <tr v-for="col in columns" :key="col.name">
-                                    <td><code>{{ col.name }}</code></td>
-                                    <td>{{ col.comment || '' }}</td>
-                                    <td>{{ col.type }}</td>
-                                    <td>{{ isPrimaryKeyColumn(col) ? '是' : '' }}</td>
-                                    <td>{{ col.nullable === false ? '否' : '是' }}</td>
+                                <tr v-for="(col, index) in columns" :key="col.name">
+                                    <td class="col-index">{{ index + 1 }}</td>
+                                    <td class="col-name">{{ col.name }}</td>
+                                    <td class="col-type">{{ col.type }}</td>
+                                    <td class="col-flag"><span :class="['flag', col.nullable === false ? 'flag-strong' : 'flag-muted']">{{ col.nullable === false ? 'NOT NULL' : 'NULL' }}</span></td>
+                                    <td class="col-flag"><span v-if="isPrimaryKeyColumn(col)" class="pk-badge">PK</span></td>
+                                    <td class="col-comment">{{ col.comment || '' }}</td>
                                 </tr>
                             </tbody>
                         </table>
                     </section>
                     <section>
-                        <div class="section-title">DDL</div>
-                        <pre class="object-ddl">{{ ddlLoading ? '加载中...' : (ddl || '暂无 DDL') }}</pre>
+                        <div class="section-head">
+                            <div class="section-title">DDL</div>
+                            <button class="section-action" :disabled="!ddlText" @click="copyDdl">复制</button>
+                        </div>
+                        <pre v-if="ddlLoading" class="object-ddl muted">加载中…</pre>
+                        <pre v-else-if="ddlError" class="object-ddl error">{{ ddlError }}</pre>
+                        <pre v-else-if="!ddlText" class="object-ddl muted">暂无 DDL</pre>
+                        <pre v-else-if="ddlHtml" class="object-ddl" v-html="ddlHtml"></pre>
+                        <pre v-else class="object-ddl">{{ ddlText }}</pre>
                     </section>
                 </div>
             </div>
@@ -295,6 +322,7 @@ export default {
                 <result-area
                     :query-result="result"
                     :show-tabs="false"
+                    :export-all="exportAllSpec"
                     :pagination="{
                         loading: dataCountLoading,
                         start: dataPageStart,

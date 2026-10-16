@@ -50,44 +50,54 @@ export default {
             return response.json();
         }
     },
+    computed: {
+        targetSource() {
+            return (this.sources || []).find(s => s.id === this.sourceId) || null;
+        },
+    },
     template: `
         <el-dialog
             :model-value="true"
             @update:model-value="$emit('close')"
             title="导入数据"
-            width="480px"
+            width="520px"
             destroy-on-close
             append-to-body
         >
-            <el-form label-position="top">
-                <el-form-item label="选择文件 (CSV / Excel)">
-                    <input type="file" accept=".csv,.xlsx,.xls" @change="handleFileChange" style="width: 100%;">
+            <el-form label-position="top" class="import-form" @submit.prevent>
+                <el-form-item label="目标连接">
+                    <div class="import-target">{{ targetSource ? targetSource.name : '-' }}<small v-if="targetSource?.database">{{ targetSource.database }}</small></div>
+                </el-form-item>
+                <el-form-item label="数据文件">
+                    <div class="import-file">
+                        <el-button @click="$refs.fileInput.click()">选择文件…</el-button>
+                        <span :class="['import-file-name', { empty: !file }]">{{ file ? file.name : '支持 CSV、Excel（.xlsx），第一行为列名' }}</span>
+                        <input ref="fileInput" type="file" accept=".csv,.xlsx" @change="handleFileChange" style="display: none;">
+                    </div>
+                </el-form-item>
+                <el-form-item label="导入方式">
+                    <el-radio-group v-model="mode">
+                        <el-radio value="create">新建表</el-radio>
+                        <el-radio value="append">追加到已有表</el-radio>
+                    </el-radio-group>
+                    <div class="field-hint">{{ mode === 'create' ? '按文件内容推断列类型建表；表名已存在时会自动加上行数后缀。' : '列名需要与已有表的列一致。' }}</div>
                 </el-form-item>
                 <el-form-item label="表名">
-                    <el-input v-model="tableName" placeholder="导入到的目标表名" />
-                </el-form-item>
-                <el-form-item label="模式">
-                    <el-select v-model="mode" style="width: 100%;">
-                        <el-option value="create" label="创建新表" />
-                        <el-option value="append" label="追加到已有表" />
-                    </el-select>
+                    <el-input v-model="tableName" placeholder="默认使用文件名" />
                 </el-form-item>
             </el-form>
 
             <el-alert
                 v-if="result"
-                :title="result.success ? ('导入成功! 表: ' + result.table_name + ', 行数: ' + result.rows_imported) : result.error"
+                :title="result.success ? ('导入成功：表 ' + result.table_name + '，共 ' + result.rows_imported + ' 行') : result.error"
                 :type="result.success ? 'success' : 'error'"
                 show-icon
                 :closable="false"
-                style="margin-top: 8px;"
             />
 
             <template #footer>
-                <el-button @click="$emit('close')">取消</el-button>
-                <el-button type="primary" @click="doImport" :loading="importing" :disabled="!file">
-                    {{ importing ? '导入中...' : '开始导入' }}
-                </el-button>
+                <el-button @click="$emit('close')">{{ result?.success ? '完成' : '取消' }}</el-button>
+                <el-button type="primary" @click="doImport" :loading="importing" :disabled="!file">开始导入</el-button>
             </template>
         </el-dialog>
     `

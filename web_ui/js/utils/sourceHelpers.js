@@ -22,6 +22,7 @@ export function defaultSourceConfig() {
         ssh_password: '',
         ssh_private_key: '',
         ssh_private_key_passphrase: '',
+        group_name: '',
     };
 }
 
@@ -43,6 +44,7 @@ export function sourcePayload(source, overrides = {}) {
         ssh_password: source.ssh_password || '',
         ssh_private_key: source.ssh_private_key || '',
         ssh_private_key_passphrase: source.ssh_private_key_passphrase || '',
+        group_name: source.group_name || '',
         ...overrides,
     };
 }

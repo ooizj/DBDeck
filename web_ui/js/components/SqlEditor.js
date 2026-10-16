@@ -1,6 +1,6 @@
 export default {
-    props: ['currentSource', 'editorHeight', 'disabled'],
-    emits: ['execute', 'execute-all', 'format'],
+    props: ['currentSource', 'editorHeight', 'disabled', 'canExplain'],
+    emits: ['execute', 'format', 'explain'],
     data() {
         return {
             showRedisCommands: false,
@@ -38,8 +38,8 @@ export default {
         <div class="editor-area" :style="{ height: editorHeight + 'px' }">
             <div class="toolbar">
                 <el-button @click="$emit('execute')" :disabled="disabled || !currentSource" :title="'运行选中语句或当前语句（' + runShortcut + '）'">▶ 运行（{{ runShortcut }}）</el-button>
-                <el-button @click="$emit('execute-all')" :disabled="disabled || !currentSource" title="运行全部脚本">▸ 运行所有</el-button>
                 <el-button @click="$emit('format')" :disabled="disabled" title="格式化 SQL">⟳ 格式化</el-button>
+                <el-button v-if="canExplain" @click="$emit('explain')" :disabled="disabled" title="分析选中语句或当前语句的执行计划">⌗ 执行计划</el-button>
                 <el-button v-if="isRedis" @click="showRedisCommands = !showRedisCommands" :disabled="disabled" title="查看 Redis 常用命令">命令参考</el-button>
                 <span class="editor-toolbar-context muted" v-if="disabled">数据库加载中，SQL 暂时只读</span>
                 <span class="editor-toolbar-context" v-else-if="currentSource">{{ currentSource.database }}</span>

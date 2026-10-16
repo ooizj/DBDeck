@@ -22,12 +22,16 @@ class SourceCreate(BaseModel):
     ssh_password: Optional[str] = None
     ssh_private_key: Optional[str] = None
     ssh_private_key_passphrase: Optional[str] = None
+    group_name: Optional[str] = None
+
+
+class GroupNameRequest(BaseModel):
+    name: str
 
 
 class QueryRequest(BaseModel):
     query: str
     source_id: Optional[int] = None
-    workspace_id: Optional[int] = None
     session_id: Optional[str] = None
 
 
@@ -42,6 +46,11 @@ class SQLRequest(BaseModel):
     page_size: int = 100
 
 
+class ExportQueryRequest(BaseModel):
+    query: str
+    source_id: int
+
+
 class ScriptRequest(BaseModel):
     content: str
 
@@ -54,19 +63,6 @@ class MigrateRequest(BaseModel):
 
 class ConfigUpdateRequest(BaseModel):
     settings: Dict[str, Any]
-
-
-class FileItem(BaseModel):
-    name: str
-    path: str
-    is_dir: bool
-    size: Optional[int] = None
-    extension: Optional[str] = None
-
-
-class FileSaveRequest(BaseModel):
-    path: str
-    content: str
 
 
 class ImportRequest(BaseModel):
@@ -91,13 +87,6 @@ class BatchEditRequest(BaseModel):
     source_id: int
     table: str
     operations: List[DataEditRequest]
-
-
-class BookmarkRequest(BaseModel):
-    source_id: int
-    object_type: str  # 'table', 'view', 'column'
-    object_name: str
-    label: Optional[str] = None
 
 
 class ExportRequest(BaseModel):

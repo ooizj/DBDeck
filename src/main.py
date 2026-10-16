@@ -34,11 +34,9 @@ def resource_path(relative_path: str) -> Path:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
-    from src.ai_core.mcp_client import manager as mcp_manager
     from src.sources.connection_manager import connection_manager
 
     connection_manager.close_all()
-    await mcp_manager.close_all()
 
 
 app = FastAPI(title="DBDeck", version=__version__, lifespan=lifespan)

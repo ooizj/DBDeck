@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter
 
-from src.api.schemas import ScriptRequest, SourceCreate
+from src.api.schemas import GroupNameRequest, ScriptRequest, SourceCreate
 from src.services import source_service
 
 logger = logging.getLogger(__name__)
@@ -67,6 +67,26 @@ async def update_source(source_id: int, source: SourceCreate):
     except Exception as e:
         logger.exception("Failed to update source")
         return {"success": False, "error": str(e)}
+
+
+@router.post("/sources/{source_id}/toggle-favorite")
+async def toggle_favorite(source_id: int):
+    return source_service.toggle_favorite(source_id)
+
+
+@router.put("/sources/{source_id}/group")
+async def set_source_group(source_id: int, payload: GroupNameRequest):
+    return source_service.set_source_group(source_id, payload.name)
+
+
+@router.put("/source-groups/{group_id}")
+async def rename_group(group_id: int, payload: GroupNameRequest):
+    return source_service.rename_group(group_id, payload.name)
+
+
+@router.delete("/source-groups/{group_id}")
+async def ungroup(group_id: int):
+    return source_service.ungroup(group_id)
 
 
 @router.get("/tree")

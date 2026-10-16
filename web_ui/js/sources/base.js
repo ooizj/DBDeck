@@ -25,7 +25,7 @@ export const defaults = {
     registerCompletion() { /* no-op */ },
     buildSelectQuery(table) { return `SELECT * FROM \`${table.name}\` LIMIT 100;`; },
     buildInsertQuery(table) { return `INSERT INTO \`${table.name}\` (...) VALUES (...);`; },
-    copyInsertLabel() { return 'Copy INSERT'; },
+    copyInsertLabel() { return '复制 INSERT'; },
     buildPreviewQuery(table) { return this.buildSelectQuery(table); },
 };
 

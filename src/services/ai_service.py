@@ -16,7 +16,6 @@ async def chat_events(
     query: str,
     *,
     source_id: Optional[int],
-    workspace_id: Optional[int],
     session_id: Optional[str],
 ) -> AsyncGenerator[str, None]:
     try:
@@ -31,7 +30,6 @@ async def chat_events(
             query,
             provider=provider,
             db=db,
-            workspace_id=workspace_id,
             source_id=source_id,
         ):
             yield json.dumps(event, ensure_ascii=False) + "\n"

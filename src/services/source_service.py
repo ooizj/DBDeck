@@ -115,6 +115,28 @@ def delete_source(source_id: int) -> dict[str, Any]:
     return {"success": True}
 
 
+def toggle_favorite(source_id: int) -> dict[str, Any]:
+    return {"success": True, "is_favorite": storage.toggle_favorite(source_id)}
+
+
+def set_source_group(source_id: int, group_name: str) -> dict[str, Any]:
+    """只改分组，不影响连接配置，因此不断开已建立的连接。"""
+    storage.update_source(source_id, group_name=group_name)
+    return {"success": True}
+
+
+def rename_group(group_id: int, name: str) -> dict[str, Any]:
+    if not (name or "").strip():
+        return {"success": False, "error": "分组名称不能为空"}
+    storage.rename_group(group_id, name)
+    return {"success": True}
+
+
+def ungroup(group_id: int) -> dict[str, Any]:
+    storage.ungroup(group_id)
+    return {"success": True}
+
+
 def disconnect_source(source_id: int) -> dict[str, Any]:
     connection_manager.drop(source_id)
     return {"success": True}
@@ -142,14 +164,9 @@ def get_tree() -> list[dict[str, Any]]:
             "ssh_private_key_passphrase": s.get("ssh_private_key_passphrase"),
             "type": "source",
             "db_type": s.get("type", "mysql"),
-            "children": [],
-        })
-    for ws in storage.get_workspaces():
-        tree.append({
-            "id": ws["id"],
-            "name": ws["name"],
-            "path": ws["path"],
-            "type": "workspace",
+            "group_id": s.get("group_id"),
+            "group_name": s.get("group_name") or "",
+            "is_favorite": bool(s.get("is_favorite")),
             "children": [],
         })
     return tree

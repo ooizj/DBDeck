@@ -1,6 +1,31 @@
-import ResultTable from './ResultTable.js?v=result-table-20260729a';
+import ResultTable from './ResultTable.js?v=result-table-20261016';
 import { buildMongoInsertOneCommand } from '../utils/mongoCommands.js';
 import { buildRedisSetCommand, formatRedisArgument } from '../utils/redisCommands.js';
+import { formatSqlLiteral } from '../utils/sqlHelpers.js';
+
+// 后端按原始列顺序返回；若用户在界面上拖动调整过列顺序，且列名唯一，则按界面顺序重排
+export function alignExportColumns(displayColumns, columns, rows) {
+    const unique = new Set(columns).size === columns.length;
+    const sameSet = displayColumns.length === columns.length && displayColumns.every(col => columns.includes(col));
+    if (!unique || !sameSet || displayColumns.every((col, i) => col === columns[i])) {
+        return { cols: columns, rows };
+    }
+    const order = displayColumns.map(col => columns.indexOf(col));
+    return {
+        cols: [...displayColumns],
+        rows: rows.map(row => (Array.isArray(row) ? order.map(i => row[i]) : row)),
+    };
+}
+
+// 大文件直接展开 String.fromCharCode(...bytes) 会超出调用栈，分块转换
+export function bytesToBase64(bytes) {
+    let binary = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+}
 
 export default {
     inject: ['dbService'],
@@ -8,6 +33,8 @@ export default {
         queryResult: { type: Object, required: true },
         pagination: { type: Object, default: null },
         showTabs: { type: Boolean, default: true },
+        // 导出全部结果所需的信息 { sourceId, query }；为空时只能导出当前页
+        exportAll: { type: Object, default: null },
     },
     emits: ['copy', 'refresh', 'page-change'],
     components: { ResultTable },
@@ -26,6 +53,9 @@ export default {
             currentPage: 1,
             pageSize: 100,
             showExportMenu: false,
+            exportScope: 'page',
+            submenuFlip: { up: false, left: false },
+            exporting: false,
             sortColumn: null,
             sortDirection: null,
             searchText: '',
@@ -51,6 +81,15 @@ export default {
         displayRows() {
             return this.activeStatement?.data || this.queryResult.rows || [];
         },
+        exportTotal() {
+            const total = Number(this.pagination?.total);
+            return Number.isFinite(total) ? total : null;
+        },
+        canExportAll() {
+            return Boolean(this.exportAll?.sourceId && this.exportAll?.query)
+                && this.exportTotal !== null
+                && this.exportTotal > this.displayRows.length;
+        },
         displayColumnMetadata() {
             return this.activeStatement?.column_metadata || this.queryResult.column_metadata || {};
         },
@@ -68,8 +107,8 @@ export default {
         },
         rowCopyLabel() {
             const providerId = this.queryResult?.providerId || this.queryResult?.provider_id;
-            if (providerId === 'mongodb') return 'Copy insertOne';
-            return providerId === 'redis' ? 'Copy SET' : 'Copy INSERT';
+            if (providerId === 'mongodb') return '复制 insertOne';
+            return providerId === 'redis' ? '复制 SET 命令' : '复制 INSERT';
         },
         supportsSqlInsertExport() {
             const providerId = this.queryResult?.providerId || this.queryResult?.provider_id;
@@ -148,6 +187,9 @@ export default {
             this.searchText = '';
         },
         searchText() { this.currentPage = 1; },
+        canExportAll(value) {
+            if (!value) this.exportScope = 'page';
+        },
     },
     methods: {
         selectStatement(idx) {
@@ -280,11 +322,7 @@ export default {
             return quote + String(name).split(quote).join(quote + quote) + quote;
         },
         sqlLiteral(value) {
-            if (value === null || value === undefined) return 'NULL';
-            if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL';
-            if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
-            const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
-            return "'" + text.replace(/'/g, "''") + "'";
+            return formatSqlLiteral(value, this.queryResult?.providerId || this.queryResult?.provider_id);
         },
         redisArgument(value) {
             return formatRedisArgument(value);
@@ -388,7 +426,7 @@ export default {
             }
             const columns = Object.keys(data);
             if (!columns.length) {
-                ElementPlus.ElMessage.warning('No insertable columns in this row');
+                ElementPlus.ElMessage.warning('这一行没有可插入的列');
                 return;
             }
             const sql = `INSERT INTO ${this.sqlIdentifier(this.currentTableName())} (${columns.map(col => this.sqlIdentifier(col)).join(', ')}) VALUES (${columns.map(col => this.sqlLiteral(data[col])).join(', ')});`;
@@ -397,7 +435,7 @@ export default {
         },
         async createRowFromContext({ duplicate = false } = {}) {
             if (!this.editableInfo.enabled) {
-                ElementPlus.ElMessage.warning(this.editableInfo.reason || 'Result is read-only');
+                ElementPlus.ElMessage.warning(this.editableInfo.reason || '当前结果只读');
                 return;
             }
             const anchorRow = this.rowContextMenu.row;
@@ -406,22 +444,22 @@ export default {
                 ? this.rowToSourceData(anchorRow, { includeGenerated: false })
                 : this.rowToSourceData(anchorRow, { includeGenerated: false, useDefaults: true });
             if (!Object.keys(data).length) {
-                ElementPlus.ElMessage.warning('No insertable columns in this result');
+                ElementPlus.ElMessage.warning('当前结果没有可插入的列');
                 return;
             }
             this.insertDisplayRowAfter(anchorRow, this.makePendingRow(data, anchorRow, duplicate ? 'duplicate' : 'new'));
-            ElementPlus.ElMessage.info(duplicate ? 'Duplicate row added locally. Right-click it and choose Save Row to insert.' : 'New row added locally. Edit it, then right-click it and choose Save Row.');
+            ElementPlus.ElMessage.info(duplicate ? '已在本地复制出新行，右键选择「保存新行」写入数据库' : '已在本地添加新行，编辑后右键选择「保存新行」写入数据库');
             this.closeRowContextMenu();
         },
         async savePendingRow(row = this.rowContextMenu.row) {
             if (!this.editableInfo.enabled) {
-                ElementPlus.ElMessage.warning(this.editableInfo.reason || 'Result is read-only');
+                ElementPlus.ElMessage.warning(this.editableInfo.reason || '当前结果只读');
                 return;
             }
             if (!this.isPendingRow(row)) return;
             const data = this.rowToSourceData(row, { includeGenerated: false });
             if (!Object.keys(data).length) {
-                ElementPlus.ElMessage.warning('No insertable columns in this row');
+                ElementPlus.ElMessage.warning('这一行没有可插入的列');
                 return;
             }
             try {
@@ -433,19 +471,19 @@ export default {
                 );
                 if (result?.success) {
                     row.__pendingInsert = false;
-                    ElementPlus.ElMessage.success('Row saved');
+                    ElementPlus.ElMessage.success('已保存');
                     this.closeRowContextMenu();
                     this.$emit('refresh');
                 } else {
-                    ElementPlus.ElMessage.error(result?.error || 'Insert failed');
+                    ElementPlus.ElMessage.error(result?.error || '插入失败');
                 }
             } catch (e) {
-                ElementPlus.ElMessage.error(e.message || 'Insert failed');
+                ElementPlus.ElMessage.error(e.message || '插入失败');
             }
         },
         async setContextCellNull() {
             if (!this.editableInfo.enabled) {
-                ElementPlus.ElMessage.warning(this.editableInfo.reason || 'Result is read-only');
+                ElementPlus.ElMessage.warning(this.editableInfo.reason || '当前结果只读');
                 return;
             }
             const row = this.rowContextMenu.row;
@@ -453,13 +491,13 @@ export default {
             if (!row || !column) return;
             if (this.isPendingRow(row)) {
                 this.setRowValue(row, column, null);
-                ElementPlus.ElMessage.info('Cell set to NULL locally. Save Row to insert it.');
+                ElementPlus.ElMessage.info('已在本地设为 NULL，右键「保存新行」后写入数据库');
                 this.closeRowContextMenu();
                 return;
             }
             const where = this.buildEditWhere(row);
             if (!where) {
-                ElementPlus.ElMessage.warning('Primary key is missing; cannot update');
+                ElementPlus.ElMessage.warning('缺少主键，无法更新');
                 return;
             }
             try {
@@ -473,31 +511,42 @@ export default {
                 );
                 if (result?.success) {
                     this.setRowValue(row, column, null);
-                    ElementPlus.ElMessage.success('Cell set to NULL');
+                    ElementPlus.ElMessage.success('已设为 NULL');
                     this.closeRowContextMenu();
                 } else {
-                    ElementPlus.ElMessage.error(result?.error || 'Update failed');
+                    ElementPlus.ElMessage.error(result?.error || '更新失败');
                 }
             } catch (e) {
-                ElementPlus.ElMessage.error(e.message || 'Update failed');
+                ElementPlus.ElMessage.error(e.message || '更新失败');
             }
         },
         async deleteContextRow() {
             if (!this.editableInfo.enabled) {
-                ElementPlus.ElMessage.warning(this.editableInfo.reason || 'Result is read-only');
+                ElementPlus.ElMessage.warning(this.editableInfo.reason || '当前结果只读');
                 return;
             }
             const row = this.rowContextMenu.row;
             if (!row) return;
             if (this.isPendingRow(row)) {
                 this.removeDisplayRow(row);
-                ElementPlus.ElMessage.success('Pending row removed');
+                ElementPlus.ElMessage.success('已移除未保存的新行');
                 this.closeRowContextMenu();
                 return;
             }
             const where = this.buildEditWhere(row);
             if (!where) {
-                ElementPlus.ElMessage.warning('Primary key is missing; cannot delete');
+                ElementPlus.ElMessage.warning('缺少主键，无法删除');
+                return;
+            }
+            const condition = Object.entries(where).map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join(' AND ');
+            this.closeRowContextMenu();
+            try {
+                await ElementPlus.ElMessageBox.confirm(
+                    `将从表「${this.editableInfo.table}」中删除满足 ${condition} 的行，此操作不可撤销。`,
+                    '确认删除',
+                    { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' }
+                );
+            } catch (e) {
                 return;
             }
             try {
@@ -510,13 +559,13 @@ export default {
                 );
                 if (result?.success) {
                     this.removeDisplayRow(row);
-                    ElementPlus.ElMessage.success('Row deleted');
+                    ElementPlus.ElMessage.success('已删除');
                     this.closeRowContextMenu();
                 } else {
-                    ElementPlus.ElMessage.error(result?.error || 'Delete failed');
+                    ElementPlus.ElMessage.error(result?.error || '删除失败');
                 }
             } catch (e) {
-                ElementPlus.ElMessage.error(e.message || 'Delete failed');
+                ElementPlus.ElMessage.error(e.message || '删除失败');
             }
         },
         parseEditedValue(original, text) {
@@ -538,7 +587,7 @@ export default {
             if (Object.is(value, originalValue)) return;
             if (this.isPendingRow(row)) {
                 this.setRowValue(row, column, value);
-                ElementPlus.ElMessage.info('Cell updated locally. Save Row to insert it.');
+                ElementPlus.ElMessage.info('已在本地修改，右键「保存新行」后写入数据库');
                 return;
             }
             const where = this.buildEditWhere(row);
@@ -603,6 +652,49 @@ export default {
         // Export methods
         toggleExportMenu() { this.showExportMenu = !this.showExportMenu; },
         closeExportMenu() { this.showExportMenu = false; },
+        // 子菜单默认在父项右下展开；放不下时向上 / 向左展开，避免超出窗口看不到
+        placeSubmenu(event) {
+            const item = event.currentTarget;
+            const submenu = item.querySelector('.submenu');
+            if (!submenu) return;
+            // 子菜单靠 :hover 显示，测量前临时显示（不可见）以拿到真实尺寸
+            const { display, visibility } = submenu.style;
+            submenu.style.visibility = 'hidden';
+            submenu.style.display = 'block';
+            const height = submenu.offsetHeight;
+            const width = submenu.offsetWidth;
+            submenu.style.display = display;
+            submenu.style.visibility = visibility;
+            const itemRect = item.getBoundingClientRect();
+            const margin = 8;
+            this.submenuFlip = {
+                up: itemRect.top + height > window.innerHeight - margin,
+                left: itemRect.right + width > window.innerWidth - margin,
+            };
+        },
+        // 返回本次导出用的 { cols, rows }；导出全部时向后端重新查询，失败返回 null
+        async resolveExportData() {
+            if (this.exportScope !== 'all' || !this.canExportAll) {
+                return { cols: this.displayColumns, rows: this.displayRows };
+            }
+            this.exporting = true;
+            try {
+                const res = await this.dbService.exportQuery(this.exportAll.query, this.exportAll.sourceId);
+                if (!res?.success) {
+                    ElementPlus.ElMessage.error('导出失败: ' + (res?.error || '未知错误'));
+                    return null;
+                }
+                if (res.truncated) {
+                    ElementPlus.ElMessage.warning(`结果超过 ${res.max_rows} 行，只导出前 ${res.max_rows} 行`);
+                }
+                return alignExportColumns(this.displayColumns, res.columns || [], res.data || []);
+            } catch (e) {
+                ElementPlus.ElMessage.error('导出失败: ' + (e.message || e));
+                return null;
+            } finally {
+                this.exporting = false;
+            }
+        },
         exportCellText(value) {
             if (value === null || value === undefined) return '';
             if (typeof value === 'object') return JSON.stringify(value);
@@ -610,8 +702,9 @@ export default {
         },
         async exportCSV() {
             this.closeExportMenu();
-            const cols = this.displayColumns;
-            const rows = this.displayRows;
+            const exportData = await this.resolveExportData();
+            if (!exportData) return;
+            const { cols, rows } = exportData;
             const csvRows = [cols.map(c => `"${c.replace(/"/g, '""')}"`).join(',')];
             for (const row of rows) {
                 csvRows.push(cols.map((col, idx) => {
@@ -625,8 +718,9 @@ export default {
         },
         async exportJSON() {
             this.closeExportMenu();
-            const cols = this.displayColumns;
-            const rows = this.displayRows;
+            const exportData = await this.resolveExportData();
+            if (!exportData) return;
+            const { cols, rows } = exportData;
             const data = rows.map(row => {
                 const obj = {};
                 cols.forEach((col, idx) => { obj[col] = this.getCellValue(row, col, idx); });
@@ -640,8 +734,9 @@ export default {
                 ElementPlus.ElMessage.error('XLSX 库未加载');
                 return;
             }
-            const cols = this.displayColumns;
-            const rows = this.displayRows;
+            const exportData = await this.resolveExportData();
+            if (!exportData) return;
+            const { cols, rows } = exportData;
             const data = rows.map(row => {
                 const obj = {};
                 cols.forEach((col, idx) => {
@@ -656,14 +751,15 @@ export default {
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'Results');
             const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-            const b64 = 'base64:' + btoa(String.fromCharCode(...new Uint8Array(wbout)));
+            const b64 = 'base64:' + bytesToBase64(new Uint8Array(wbout));
             await this._saveFile(b64, 'query-result.xlsx', '*.xlsx');
         },
         async exportSQLInsert() {
             this.closeExportMenu();
-            const cols = this.displayColumns;
-            const rows = this.displayRows;
-            const tableName = 'exported_table';
+            const exportData = await this.resolveExportData();
+            if (!exportData) return;
+            const { cols, rows } = exportData;
+            const tableName = this.editableInfo?.table || 'exported_table';
             const lines = rows.map(row => {
                 const vals = cols.map((col, idx) => {
                     const val = this.getCellValue(row, col, idx);
@@ -676,8 +772,9 @@ export default {
         },
         async exportMarkdown() {
             this.closeExportMenu();
-            const cols = this.displayColumns;
-            const rows = this.displayRows;
+            const exportData = await this.resolveExportData();
+            if (!exportData) return;
+            const { cols, rows } = exportData;
             const header = '| ' + cols.join(' | ') + ' |';
             const sep = '| ' + cols.map(() => '---').join(' | ') + ' |';
             const body = rows.map(row =>
@@ -805,8 +902,13 @@ export default {
                                 <div class="result-toolbar-spacer"></div>
                                 <el-button size="small" title="刷新" @click="$emit('refresh')">刷新</el-button>
                                 <div v-if="displayRows.length > 0" class="result-export-inline">
-                                    <el-button size="small" @click.stop="toggleExportMenu">导出</el-button>
+                                    <el-button size="small" @click.stop="toggleExportMenu" :loading="exporting">{{ exporting ? '导出中…' : '导出' }}</el-button>
                                     <div v-if="showExportMenu" class="export-dropdown" @click.stop>
+                                        <div v-if="canExportAll" class="export-scope-switch">
+                                            <button type="button" :class="{ active: exportScope === 'page' }" @click="exportScope = 'page'">当前页 {{ displayRows.length }} 行</button>
+                                            <button type="button" :class="{ active: exportScope === 'all' }" @click="exportScope = 'all'">全部 {{ exportTotal }} 行</button>
+                                        </div>
+                                        <div v-else class="export-scope">导出当前页 {{ displayRows.length }} 行</div>
                                         <div class="export-item" @click="exportCSV">CSV</div>
                                         <div class="export-item" @click="exportJSON">JSON</div>
                                         <div class="export-item" @click="exportXLSX">XLSX (Excel)</div>
@@ -875,18 +977,18 @@ export default {
                  class="context-menu result-row-context-menu"
                  :style="{ top: rowContextMenu.y + 'px', left: rowContextMenu.x + 'px' }"
                  @click.stop>
-                <div v-if="isPendingRow(rowContextMenu.row)" class="menu-item" @click="savePendingRow(rowContextMenu.row)">Save Row</div>
+                <div v-if="isPendingRow(rowContextMenu.row)" class="menu-item" @click="savePendingRow(rowContextMenu.row)">保存新行</div>
                 <div v-if="isPendingRow(rowContextMenu.row)" class="menu-separator"></div>
                 <div class="menu-item" @click="copyRowInsert">{{ rowCopyLabel }}</div>
-                <div v-if="editableInfo.enabled" class="menu-item">
-                    <span>Edit</span><span>›</span>
-                    <div class="submenu">
-                        <div v-if="rowContextMenu.column" class="menu-item" @click="setContextCellNull">Set NULL</div>
+                <div v-if="editableInfo.enabled" class="menu-item" @mouseenter="placeSubmenu">
+                    <span>编辑</span><span>›</span>
+                    <div :class="['submenu', { 'submenu-up': submenuFlip.up, 'submenu-left': submenuFlip.left }]">
+                        <div v-if="rowContextMenu.column" class="menu-item" @click="setContextCellNull">设为 NULL</div>
                         <div v-if="rowContextMenu.column" class="menu-separator"></div>
-                        <div class="menu-item" @click="createRowFromContext()">New Row</div>
-                        <div class="menu-item" @click="createRowFromContext({ duplicate: true })">Duplicate Row</div>
+                        <div class="menu-item" @click="createRowFromContext()">新增行</div>
+                        <div class="menu-item" @click="createRowFromContext({ duplicate: true })">复制为新行</div>
                         <div class="menu-separator"></div>
-                        <div class="menu-item danger" @click="deleteContextRow">Delete Row</div>
+                        <div class="menu-item danger" @click="deleteContextRow">删除行</div>
                     </div>
                 </div>
             </div>

@@ -52,7 +52,7 @@ export default {
                 <div class="redis-key-header">
                     <div class="redis-field-group redis-type-field">
                         <label>Type</label>
-                        <el-select v-model="editor.type" :disabled="editor.mode !== 'new'" size="small" style="width: 100%;">
+                        <el-select no-data-text="无数据" no-match-text="无匹配数据" v-model="editor.type" :disabled="editor.mode !== 'new'" size="small" style="width: 100%;">
                             <el-option value="string" label="String" />
                             <el-option value="hash" label="Hash" />
                             <el-option value="list" label="List" />
@@ -77,7 +77,7 @@ export default {
                 <div v-if="editor.error" class="redis-editor-error">{{ editor.error }}</div>
 
                 <div class="redis-value-toolbar">
-                    <el-select v-model="editor.format" size="small" style="width: 110px;">
+                    <el-select no-data-text="无数据" no-match-text="无匹配数据" v-model="editor.format" size="small" style="width: 110px;">
                         <el-option value="text" label="Text" />
                         <el-option value="json" label="JSON" />
                     </el-select>

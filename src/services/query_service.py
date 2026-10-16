@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from src.common.errors import redact_sensitive
-from src.common.sql_utils import add_limit_to_sql, build_select_pagination
+import sqlglot
+from sqlglot import exp
+
+from src.common.sql_utils import add_limit_to_sql, build_select_pagination, split_sql_by_tokens
 from src.services.history_service import add_history
 from src.services.result_standardizer import standardize_result
 from src.services.source_service import resolve_source
@@ -149,6 +152,69 @@ def execute_query(
             status="error",
             error_msg=str(e),
         )
+        return {"success": False, "error": redact_sensitive(e)}
+    finally:
+        if db:
+            db.close()
+
+
+# 导出全部结果时最多返回的行数，避免超大结果一次性读入内存
+EXPORT_MAX_ROWS = 100_000
+
+_EXPORT_DIALECTS = {"mysql": "mysql", "postgresql": "postgres", "sqlite": "sqlite"}
+
+
+def _limit_for_export(statement: str, dialect: str, max_rows: int) -> str:
+    """没有 LIMIT 的查询追加 LIMIT max_rows + 1（多取一行用来判断是否被截断）；自带 LIMIT 的保持原样。"""
+    try:
+        parsed = sqlglot.parse_one(statement, read=dialect)
+    except Exception:
+        return statement
+    if not isinstance(parsed, exp.Query) or parsed.args.get("limit") is not None:
+        return statement
+    return parsed.limit(max_rows + 1).sql(dialect=dialect)
+
+
+def export_query(query: str, source_id: int, *, max_rows: int = EXPORT_MAX_ROWS) -> dict[str, Any]:
+    """不分页地重新执行一条只读查询，供"导出全部结果"使用。
+
+    只接受 SQL 数据源上的单条只读语句；结果最多返回 max_rows 行，超出时 truncated=True。
+    不写入查询历史（用户在控制台执行时已经记录过）。
+    """
+    db = None
+    try:
+        provider, db = resolve_source(source_id)
+        dialect = _EXPORT_DIALECTS.get(provider.id)
+        if dialect is None or provider.capabilities.query_language != "sql":
+            return {"success": False, "error": f"{provider.display_name} 不支持导出全部结果"}
+        statements = [s.strip().rstrip(";").strip() for s in split_sql_by_tokens(query or "", dialect=dialect)]
+        statements = [s for s in statements if s]
+        if len(statements) != 1:
+            return {"success": False, "error": "导出全部结果只支持单条查询语句"}
+        statement = statements[0]
+        if provider.classify_operation(statement).kind != "read":
+            return {"success": False, "error": "只能导出只读查询的结果"}
+
+        result = db.execute(_limit_for_export(statement, dialect, max_rows))
+        if not isinstance(result, dict) or result.get("success") is False:
+            error = (result or {}).get("error_msg") or (result or {}).get("error") or "查询失败"
+            return {"success": False, "error": error}
+        raw_statements = result.get("statements") or []
+        active = raw_statements[-1] if raw_statements else result
+        columns = active.get("columns") or result.get("columns") or []
+        rows = active.get("data") or result.get("data") or []
+        truncated = len(rows) > max_rows
+        if truncated:
+            rows = rows[:max_rows]
+        return {
+            "success": True,
+            "columns": columns,
+            "data": rows,
+            "row_count": len(rows),
+            "truncated": truncated,
+            "max_rows": max_rows,
+        }
+    except Exception as e:
         return {"success": False, "error": redact_sensitive(e)}
     finally:
         if db:

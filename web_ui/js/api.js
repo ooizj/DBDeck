@@ -46,6 +46,10 @@ export const dbService = {
             page_size: options.pageSize ?? 100,
         })
     }),
+    exportQuery: (query, sourceId) => fetchApi('/export-query', {
+        method: 'POST',
+        body: JSON.stringify({ query, source_id: sourceId }),
+    }),
     getMetadata: (sourceId, options = {}) => {
         const params = new URLSearchParams({ source_id: sourceId });
         if (options.keyPattern) params.set('key_pattern', options.keyPattern);
@@ -132,43 +136,14 @@ export const dbService = {
     }),
     getTableColumns: (sourceId, table) => fetchApi(`/data/columns?source_id=${sourceId}&table=${encodeURIComponent(table)}`),
     getPrimaryKey: (sourceId, table) => fetchApi(`/data/primary-key?source_id=${sourceId}&table=${encodeURIComponent(table)}`),
-    // ========== 书签功能 ==========
-    getBookmarks: (sourceId = null) => {
-        const params = sourceId ? `?source_id=${sourceId}` : '';
-        return fetchApi(`/bookmarks${params}`);
-    },
-    addBookmark: (sourceId, objectType, objectName, label = null) => fetchApi('/bookmarks', {
-        method: 'POST',
-        body: JSON.stringify({ source_id: sourceId, object_type: objectType, object_name: objectName, label })
-    }),
-    removeBookmark: (sourceId, objectType, objectName) => {
-        const params = new URLSearchParams({ source_id: sourceId, object_type: objectType, object_name: objectName });
-        return fetchApi(`/bookmarks?${params}`, { method: 'DELETE' });
-    },
-    checkBookmark: (sourceId, objectType, objectName) => {
-        const params = new URLSearchParams({ source_id: sourceId, object_type: objectType, object_name: objectName });
-        return fetchApi(`/bookmarks/check?${params}`);
-    },
+    // ========== 连接分组与收藏 ==========
     toggleFavorite: (sourceId) => fetchApi(`/sources/${sourceId}/toggle-favorite`, { method: 'POST' }),
+    setSourceGroup: (sourceId, name) => fetchApi(`/sources/${sourceId}/group`, { method: 'PUT', body: JSON.stringify({ name }) }),
+    renameGroup: (groupId, name) => fetchApi(`/source-groups/${groupId}`, { method: 'PUT', body: JSON.stringify({ name }) }),
+    ungroup: (groupId) => fetchApi(`/source-groups/${groupId}`, { method: 'DELETE' }),
     // ========== 会话管理功能 ==========
     getSessions: (sourceId) => fetchApi(`/sessions?source_id=${sourceId}`),
     killSession: (sourceId, sessionId) => fetchApi(`/sessions/kill?source_id=${sourceId}&session_id=${sessionId}`, { method: 'POST' }),
-    // ========== 搜索功能 ==========
-    searchData: (sourceId, table, query, columns = null, limit = 100) => {
-        const params = new URLSearchParams({ source_id: sourceId, table, query, limit });
-        if (columns) params.set('columns', columns);
-        return fetchApi(`/search/data?${params}`);
-    },
-    searchMetadata: (sourceId, query, objectType = null) => {
-        const params = new URLSearchParams({ source_id: sourceId, query });
-        if (objectType) params.set('object_type', objectType);
-        return fetchApi(`/search/metadata?${params}`);
-    },
-    fullTextSearch: (sourceId, query, tables = null, limit = 50) => {
-        const params = new URLSearchParams({ source_id: sourceId, query, limit });
-        if (tables) params.set('tables', tables);
-        return fetchApi(`/search/full-text?${params}`);
-    },
     // ========== 执行计划功能 ==========
     getVisualPlan: (sourceId, query) => {
         const params = new URLSearchParams({ source_id: sourceId, query });

@@ -39,6 +39,8 @@ SOURCE_FIELDS = {
     "ssh_password",
     "ssh_private_key",
     "ssh_private_key_passphrase",
+    "group_name",
+    "is_favorite",
 }
 
 

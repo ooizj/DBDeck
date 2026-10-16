@@ -9,6 +9,11 @@ export function useSettings({ dbService, notify, showMessage, isLoading, refresh
             const res = await dbService.getConfig();
             if (res.success) {
                 Object.assign(systemConfig, res.config);
+                // 后端按字符串存储，数字输入框需要数值
+                ['LLM_TEMPERATURE', 'LLM_MAX_TOKENS'].forEach((key) => {
+                    const value = Number(systemConfig[key]);
+                    systemConfig[key] = Number.isFinite(value) ? value : undefined;
+                });
             }
             showConfigModal.value = true;
         } catch (e) {

@@ -34,5 +34,18 @@ export function useNotifications() {
             .catch(() => false);
     };
 
-    return { notify, showMessage, showConfirm };
+    // 返回 Promise<string|null>：确定 -> 输入的文本，取消 -> null
+    const showPrompt = (msg, title = "输入", { inputValue = "", placeholder = "" } = {}) => {
+        const { ElMessageBox } = ElementPlus;
+        return ElMessageBox.prompt(msg, title, {
+            confirmButtonText: "确定",
+            cancelButtonText: "取消",
+            inputValue,
+            inputPlaceholder: placeholder,
+        })
+            .then(({ value }) => value ?? "")
+            .catch(() => null);
+    };
+
+    return { notify, showMessage, showConfirm, showPrompt };
 }

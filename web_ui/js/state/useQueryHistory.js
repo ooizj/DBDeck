@@ -1,6 +1,6 @@
 const { ref, watch } = Vue;
 
-export function useQueryHistory({ dbService, getEditor, getEditorMode, getActiveTab, showMessage, showConfirm, notify }) {
+export function useQueryHistory({ dbService, getEditor, getActiveTab, showMessage, showConfirm, notify }) {
     const historyItems = ref([]);
     const historySearch = ref('');
 
@@ -30,9 +30,7 @@ export function useQueryHistory({ dbService, getEditor, getEditorMode, getActive
             }]);
             editor.focus();
         }
-        const editorMode = getEditorMode();
         const activeTab = getActiveTab();
-        if (editorMode) editorMode.value = 'sql';
         if (activeTab) activeTab.value = 'database';
     };
 

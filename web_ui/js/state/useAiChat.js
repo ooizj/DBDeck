@@ -102,7 +102,6 @@ export function useAiChat({ dbService, getCurrentSource, queryResult, notify, sh
                 body: JSON.stringify({
                     query: queryText,
                     source_id: getCurrentSource()?.id,
-                    workspace_id: null,
                     session_id: aiSessionId
                 }),
                 signal: abortController.signal

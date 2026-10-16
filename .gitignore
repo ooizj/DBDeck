@@ -61,3 +61,6 @@ venv.bak/
 config.db
 .kiro/
 data/
+
+# 打包同步用的提交说明（package-source.command 读取，不提交）
+COMMIT_MESSAGE.txt

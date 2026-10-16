@@ -1,88 +1,144 @@
-"""EXPLAIN 执行计划树形转换器的健壮性回归测试。
+"""执行计划转换与安全性的回归测试。"""
+from contextlib import contextmanager
+from types import SimpleNamespace
 
-背景：data/rows 键名修复后，/explain/visualize 首次真正调用 plan 转换器。
-转换器原本用链式 .get('query_block', {}).get('table', {}).get(...) 假设
-EXPLAIN JSON 只有单一形状，但真实结构因 join / ordering_operation / 子查询等
-而异，某些字段可能是 int/list，导致 "'int' object has no attribute 'get'"。
-这些测试钉死：转换器对各种畸形/非预期结构都不应抛 AttributeError。
-"""
-from src.services.explain_service import _convert_mysql_plan_to_tree, _convert_pg_plan_to_tree
+import pytest
+
+from src.services import explain_service
+from src.services.explain_service import (
+    ExplainError,
+    convert_pg_plan,
+    convert_sqlite_plan,
+    single_statement,
+)
 
 
-def test_mysql_converter_handles_int_where_dict_expected():
-    # query_block/table/cost_info 任一本应是 dict 的字段若为 int，不得崩溃
-    plan = {"query_block": {"table": 123, "cost_info": 456}}
-    tree = _convert_mysql_plan_to_tree(plan)
-    assert tree["operation"] == "Unknown"
-    assert tree["cost"] == 0
+class _RecordingDb:
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = []
+
+    def execute(self, sql, params=None):
+        self.calls.append(sql)
+        return self.results.pop(0)
+
+
+def _patch_source(monkeypatch, provider_id, db):
+    provider = SimpleNamespace(id=provider_id, display_name=provider_id)
+
+    @contextmanager
+    def managed_source(_source_id):
+        yield provider, db
+
+    monkeypatch.setattr(explain_service, "managed_source", managed_source)
+
+
+def test_single_statement_strips_trailing_semicolon():
+    assert single_statement("  SELECT * FROM t;  ", "mysql") == "SELECT * FROM t"
+
+
+def test_single_statement_rejects_multiple_statements():
+    with pytest.raises(ExplainError):
+        single_statement("SELECT 1; DROP TABLE audit", "mysql")
+
+
+def test_multiple_statements_are_never_sent_to_database(monkeypatch):
+    db = _RecordingDb([])
+    _patch_source(monkeypatch, "mysql", db)
+
+    result = explain_service.visualize_execution_plan(1, "SELECT 1; DROP TABLE audit;")
+
+    assert result["success"] is False
+    assert db.calls == []
+
+
+def test_mysql_error_is_reported_instead_of_empty_plan(monkeypatch):
+    db = _RecordingDb([{"success": False, "error": "Table 'shop.nope' doesn't exist"}])
+    _patch_source(monkeypatch, "mysql", db)
+
+    result = explain_service.visualize_execution_plan(1, "SELECT * FROM nope")
+
+    assert result == {"success": False, "error": "Table 'shop.nope' doesn't exist"}
+
+
+def test_mysql_returns_tabular_explain_and_raw_json(monkeypatch):
+    columns = ["id", "select_type", "table", "partitions", "type", "possible_keys",
+               "key", "key_len", "ref", "rows", "filtered", "Extra"]
+    row = [1, "SIMPLE", "orders", None, "ALL", None, None, None, None, 120, 33.33, "Using where"]
+    db = _RecordingDb([
+        {"success": True, "columns": columns, "data": [row]},
+        {"success": True, "columns": ["EXPLAIN"], "data": [['{"query_block": {"select_id": 1}}']]},
+    ])
+    _patch_source(monkeypatch, "mysql", db)
+
+    result = explain_service.visualize_execution_plan(1, "SELECT * FROM orders WHERE amount > 10;")
+
+    assert db.calls == [
+        "EXPLAIN SELECT * FROM orders WHERE amount > 10",
+        "EXPLAIN FORMAT=JSON SELECT * FROM orders WHERE amount > 10",
+    ]
+    assert result["success"] is True
+    assert result["tree"] is None
+    assert result["table"] == {"columns": columns, "rows": [row]}
+    assert result["raw"] == {"query_block": {"select_id": 1}}
+
+
+def test_postgresql_plan_keeps_every_level_of_nesting(monkeypatch):
+    plan = [{
+        "Plan": {
+            "Node Type": "Hash Join", "Join Type": "Inner", "Startup Cost": 1.5, "Total Cost": 40.2,
+            "Plan Rows": 10, "Plan Width": 8, "Hash Cond": "(o.customer_id = c.id)",
+            "Plans": [
+                {"Node Type": "Seq Scan", "Relation Name": "orders", "Alias": "o",
+                 "Startup Cost": 0, "Total Cost": 20, "Plan Rows": 100, "Plan Width": 8},
+                {"Node Type": "Hash", "Startup Cost": 1, "Total Cost": 1, "Plan Rows": 5, "Plan Width": 4,
+                 "Plans": [{"Node Type": "Index Scan", "Relation Name": "customers", "Alias": "customers",
+                            "Index Name": "customers_pkey", "Startup Cost": 0, "Total Cost": 1,
+                            "Plan Rows": 5, "Plan Width": 4}]},
+            ],
+        },
+        "Planning Time": 0.12,
+    }]
+    db = _RecordingDb([{"success": True, "columns": ["QUERY PLAN"], "data": [[plan]]}])
+    _patch_source(monkeypatch, "postgresql", db)
+
+    result = explain_service.visualize_execution_plan(1, "SELECT 1")
+
+    tree = result["tree"]
+    assert tree["label"] == "Hash Join"
+    assert {"key": "Hash Cond", "value": "(o.customer_id = c.id)"} in tree["metrics"]
+    assert tree["children"][0]["detail"] == "orders o"
+    index_scan = tree["children"][1]["children"][0]
+    assert index_scan["label"] == "Index Scan"
+    assert index_scan["detail"] == "索引 customers_pkey customers"
+    assert [row[0].strip() for row in result["table"]["rows"]] == ["Hash Join", "Seq Scan", "Hash", "Index Scan"]
+    assert result["planning_time"] == 0.12
+
+
+def test_pg_plan_accepts_json_text():
+    tree = convert_pg_plan({"Node Type": "Result", "Plans": "not-a-list"})
+    assert tree["label"] == "Result"
     assert tree["children"] == []
 
 
-def test_mysql_converter_handles_normal_plan():
-    plan = {
-        "query_block": {
-            "select_id": 1,
-            "table": {
-                "table_name": "users",
-                "access_type": "ALL",
-                "rows_examined_per_scan": 100,
-                "filtered": 100,
-                "cost_info": {"read_cost": 10.5},
-            },
-        }
-    }
-    tree = _convert_mysql_plan_to_tree(plan)
-    assert tree["table"] == "users"
-    assert tree["operation"] == "ALL"
-    assert tree["rows"] == 100
-    assert tree["cost"] == 10.5
+def test_sqlite_plan_is_nested_by_parent_id():
+    rows = [
+        [2, 0, 0, "SCAN o"],
+        [5, 0, 0, "SEARCH c USING INTEGER PRIMARY KEY (rowid=?)"],
+        [9, 0, 0, "USE TEMP B-TREE FOR ORDER BY"],
+        [12, 5, 0, "CORRELATED SCALAR SUBQUERY 1"],
+    ]
+    tree = convert_sqlite_plan(rows)
+
+    assert [child["label"] for child in tree["children"]] == [
+        "SCAN o",
+        "SEARCH c USING INTEGER PRIMARY KEY (rowid=?)",
+        "USE TEMP B-TREE FOR ORDER BY",
+    ]
+    assert tree["children"][1]["children"][0]["label"] == "CORRELATED SCALAR SUBQUERY 1"
 
 
-def test_mysql_converter_type_is_always_string():
-    # 前端 getOperationIcon(type) 会调用 type.toLowerCase()，type 必须是字符串。
-    # 历史 bug：曾用 select_id(整数) 当 type，导致前端 "type.toLowerCase is not a function"。
-    plan = {"query_block": {"select_id": 1, "table": {"table_name": "u", "access_type": "ref"}}}
-    tree = _convert_mysql_plan_to_tree(plan)
-    assert isinstance(tree["type"], str)
-    assert tree["type"] == "ref"
-    # 无 table（仅 query_block）时也必须是字符串
-    tree2 = _convert_mysql_plan_to_tree({"query_block": {"select_id": 2}})
-    assert isinstance(tree2["type"], str)
-
-
-def test_mysql_converter_handles_nested_loop_with_non_dict_items():
-    # nested_loop 里混入非 dict 元素，不得崩溃
-    plan = {"query_block": {"nested_loop": [{"table": {"table_name": "t1"}}, 99, None]}}
-    tree = _convert_mysql_plan_to_tree(plan)
-    # 只有第一个 dict 元素被解析为子节点
-    assert len(tree["children"]) == 1
-    assert tree["children"][0]["table"] == "t1"
-
-
-def test_mysql_converter_handles_non_dict_root():
-    assert _convert_mysql_plan_to_tree(123)["children"] == []
-    assert _convert_mysql_plan_to_tree(None)["children"] == []
-    assert _convert_mysql_plan_to_tree("not a plan")["children"] == []
-
-
-def test_pg_converter_handles_int_fields():
-    plan = {"Node Type": "Seq Scan", "Plans": 42}  # Plans 本应是 list，这里给 int
-    tree = _convert_pg_plan_to_tree(plan)
-    assert tree["type"] == "Seq Scan"
-    assert tree["children"] == []
-
-
-def test_pg_converter_handles_nested_plans():
-    plan = {
-        "Node Type": "Nested Loop",
-        "Startup Cost": 0.0,
-        "Total Cost": 10.0,
-        "Plans": [
-            {"Node Type": "Seq Scan", "Relation Name": "a"},
-            {"Node Type": "Index Scan", "Relation Name": "b"},
-        ],
-    }
-    tree = _convert_pg_plan_to_tree(plan)
-    assert tree["type"] == "Nested Loop"
-    assert len(tree["children"]) == 2
-    assert tree["children"][0]["relation"] == "a"
+def test_unsupported_provider_is_rejected(monkeypatch):
+    _patch_source(monkeypatch, "redis", _RecordingDb([]))
+    result = explain_service.visualize_execution_plan(1, "GET key")
+    assert result["success"] is False

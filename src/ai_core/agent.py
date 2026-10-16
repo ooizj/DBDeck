@@ -19,10 +19,8 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 from openai import AsyncOpenAI
 
 from src.ai_core.tools.registry import ToolContext, serialize_result
-from src.ai_core.mcp_client import manager as mcp_manager, TOOL_PREFIX as MCP_TOOL_PREFIX
 from src.ai_core.tool_policy import needs_confirmation
 from src.common.config import config
-from src.common.storage import storage
 from src.sources.base import DataSourceClient, SourceProvider
 
 logger = logging.getLogger(__name__)
@@ -36,48 +34,6 @@ _SQL_START_RE = re.compile(
     r"REPLACE|MERGE|CREATE|ALTER|DROP|TRUNCATE|RENAME)\b",
     re.I,
 )
-
-_CODE_EDITING_PROMPT_PATCH = """
-
-# 核心指令：代码编辑与工作区操作规范
-
-当前项目工作区已激活。你拥有通过 `fs_*` 前缀工具读取、搜索、编辑和创建文件的权限。请严格遵守以下操作硬约束。
-
----
-
-## 🚨 路径参数硬要求（最高优先级）
-
-* **绝对路径限制**：所有工具的 `path` 参数**必须是绝对路径**，且必须以给定的“工作区路径”开头。
-* **严禁相对路径**：**绝对禁止**使用 `.`, `./`, `~` 或任何项目相对路径，否则 MCP 沙箱将直接拒绝执行。
-* **路径分隔符规范**：统一使用**正斜杠 `/`** 作为路径分隔符（例如：`C:/foo/bar/src/main.py`）。严禁使用未转义的单反斜杠 `\\`。
-
----
-
-## 🛠️ 工具操作规范
-
-### 1. 文件检索与查找
-* **深层递归搜索（Glob 规则）**：使用 `fs_search_files` 查找文件时，`pattern` 参数**必须**使用双星号 `**/*` 格式以支持递归子目录搜索（例如：`**/*文件名*` 或 `**/*HelloResource*`）。
-    > *注意：普通的 `*文件名*` 只能匹配当前层级，无法触达深层目录。*
-* **高效检索**：优先使用 `fs_search_files` 精确查找，禁止盲目使用 `fs_list_directory` 穷举目录。同一目录下严禁重复执行 `fs_list_directory`。
-* **内容搜索替代方案**：`fs_search_files` 仅支持按文件名搜索。若需查找特定代码内容（如 "implements XXX"），请根据命名预判并用 `fs_read_file` 定向读取，**严禁**逐个遍历读取所有文件。
-* **未找到实现类的止损逻辑**：若检索 2-3 次仍未找到实现类，判定该项目仅包含接口定义。此时应**直接在接口文件中新增方法定义**，并告知用户实现类可能位于其他独立项目中。
-
-### 2. 文件修改与写入
-* **先读后改（严禁盲猜）**：在执行 `fs_edit_file` 或 `fs_write_file` 之前，**必须**先调用 `fs_read_file` 读取当前文件内容。根据实际内容进行精确替换，**严禁**基于猜测整盘覆写。
-* **无需前置确认**：对于写入、修改、删除、移动（`fs_write_file`, `fs_edit_file`, `fs_move_file` 等）等敏感操作，前端系统会自动拦截并弹出用户确认窗。你只需**直接发起工具调用**，无需在对话中反复询问用户是否确认。
-
-### 3. 结果汇报
-* **精简汇报**：操作完成后，仅需用 1-2 句话简要说明修改了哪些文件及核心变更。**严禁在对话中复述整段代码**。
-
----
-
-## 🔍 工具结果解读指南
-
-* **成功判定**：工具返回 `{"success": true, "output": "..."}` 即代表执行成功。`output` 内即为 MCP 服务返回的真实文本（如目录列表、文件内容等），请直接使用。
-* **空输出处理**：若 `success` 均为 `true` 但 `output` 为空，说明目录无文件或文件无内容，**严禁将其主观臆断为“工具失败”**。
-* **失败判定**：仅当工具返回 `{"success": false, "error": "..."}` 时才视为失败。此时请直接将 `error` 信息提取并反馈给用户。
-
-"""
 
 
 def _result_has_query(result: Dict[str, Any]) -> Optional[str]:
@@ -205,45 +161,12 @@ class Agent:
                 "row_count": result.get("row_count", 0),
             }
 
-    async def _resolve_workspace_mcp(
-        self, workspace_id: Optional[int]
-    ) -> tuple[Optional[Any], List[Dict[str, Any]], Optional[str], Optional[str]]:
-        """根据 workspace_id 取 MCP client、工具列表、workspace 路径、错误信息。"""
-        if workspace_id is None:
-            return None, [], None, None
-        ws = storage.get_workspace(workspace_id)
-        if not ws:
-            return None, [], None, f"workspace_id={workspace_id} 不存在"
-        try:
-            client = await mcp_manager.get(workspace_id, ws["path"])
-            tools = await client.list_tools()
-            return client, tools, ws["path"], None
-        except Exception as e:
-            err = f"{type(e).__name__}: {e}"
-            logger.error(f"[Agent] MCP unavailable for workspace {workspace_id}: {err}", exc_info=True)
-            return None, [], ws["path"], err
-
-    async def _invoke_tool(
-        self,
-        name: str,
-        args: Dict[str, Any],
-        ctx: ToolContext,
-        tools_registry,
-        mcp_client: Optional[Any],
-    ) -> Dict[str, Any]:
-        if name.startswith(MCP_TOOL_PREFIX):
-            if mcp_client is None:
-                return {"success": False, "error": "未选择项目工作区，无法使用文件工具"}
-            return await mcp_client.call_tool(name, args)
-        return await tools_registry.invoke(name, args, ctx)
-
     async def chat(
         self,
         user_input: str,
         *,
         provider: SourceProvider,
         db: Optional[DataSourceClient] = None,
-        workspace_id: Optional[int] = None,
         source_id: Optional[int] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         if not config.llm_api_key or config.llm_api_key == "your_api_key_here":
@@ -265,41 +188,20 @@ class Agent:
         self.bound_provider_id = provider.id
 
         tools_registry = provider.tools()
-        mcp_client, mcp_tools, workspace_path, mcp_error = await self._resolve_workspace_mcp(workspace_id)
-        if workspace_path:
-            self.session["workspace_path"] = workspace_path
         ctx = ToolContext(
             db=db,
             session=self.session,
             extras={"source_id": source_id, "provider_id": provider.id},
         )
 
-        # 用户选了 workspace 但 MCP 起不来 —— 必须告诉用户，否则 LLM 会在没有 fs_ 工具的情况下编造借口
-        if workspace_id is not None and mcp_client is None and mcp_error:
-            yield {
-                "type": "error",
-                "message": (
-                    f"项目工作区 MCP 服务启动失败：{mcp_error}\n"
-                    f"路径：{workspace_path or '(unknown)'}\n"
-                    f"请确认：(1) Node.js 18+ 已安装且 npx 在 PATH 中；"
-                    f"(2) 目录存在且可访问；(3) 首次启动需联网拉取 @modelcontextprotocol/server-filesystem。"
-                ),
-            }
-            return
-
         system_prompt = provider.system_prompt(session_ctx="")
-        if mcp_client is not None:
-            system_prompt = system_prompt + _CODE_EDITING_PROMPT_PATCH + (
-                f"\n当前工作区路径：{workspace_path}\n"
-            )
         system_msg = {"role": "system", "content": system_prompt}
         if not self.history:
             self.history.append(system_msg)
         else:
             self.history[0] = system_msg
 
-        # 合并工具：provider 自带 + workspace MCP
-        combined_tools = list(tools_registry.openai_tools()) + list(mcp_tools)
+        combined_tools = list(tools_registry.openai_tools())
 
         turn_query: Optional[str] = None
         turn_queries: List[str] = []
@@ -534,7 +436,7 @@ class Agent:
                     tool_call_history.append((name, stable_args))
 
                     yield {"type": "tool_start", "tool": name, "args": args}
-                    result = await self._invoke_tool(name, args, ctx, tools_registry, mcp_client)
+                    result = await tools_registry.invoke(name, args, ctx)
                     if isinstance(result, dict):
                         result.setdefault("source_id", source_id)
                         result.setdefault("provider_id", provider.id)

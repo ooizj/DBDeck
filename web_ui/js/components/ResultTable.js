@@ -75,9 +75,21 @@ export default {
         toggleSort(col) {
             this.$emit('sort', col);
         },
-        autoFitColumn(idx) {
+        // 表格从自动列宽切到固定布局（table-layout: fixed）时，没有显式宽度的列会被压缩到几乎为 0，
+        // 所以第一次设置某列宽度前，先把所有列的当前实际宽度记下来
+        freezeColumnWidths(th) {
+            const ths = th?.parentElement?.children || [];
+            this.columns.forEach((col, i) => {
+                const current = this.columnWidths[col];
+                if ((current === undefined || current === null) && ths[i]) {
+                    this.$emit('resize-column', i, Math.ceil(ths[i].getBoundingClientRect().width));
+                }
+            });
+        },
+        autoFitColumn(e, idx) {
             const col = this.columns[idx];
             if (!col) return;
+            this.freezeColumnWidths(e.target.closest('th'));
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             ctx.font = '13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -93,7 +105,10 @@ export default {
             const newWidth = Math.min(Math.max(Math.ceil(maxWidth) + 28, 60), 400);
             this.$emit('resize-column', idx, newWidth);
         },
-        showCellDetail(row, col, idx, rowIdx, colIdx) {
+        showCellDetail(row, col, idx, rowIdx, colIdx, event) {
+            // 单元格换成输入框后不再撑开列宽，先固定所有列宽，避免该列被压窄
+            const firstTh = event?.target?.closest('table')?.querySelector('thead th');
+            if (firstTh) this.freezeColumnWidths(firstTh);
             const val = this.getCellValue(row, col, idx);
             if (val === null || val === undefined) {
                 if (!this.editable?.enabled) return;
@@ -172,19 +187,10 @@ export default {
             const startX = e.clientX;
             const th = e.target.closest('th');
             const startWidth = th.getBoundingClientRect().width;
-            const ths = th.parentElement.children;
-            const cols = this.columns;
-            const currentWidths = { ...this.columnWidths };
-            for (let i = 0; i < cols.length; i++) {
-                const colName = cols[i];
-                if (!currentWidths[colName]) {
-                    currentWidths[colName] = ths[i].getBoundingClientRect().width;
-                }
-            }
+            this.freezeColumnWidths(th);
             const onMouseMove = (moveEvent) => {
                 const deltaX = moveEvent.clientX - startX;
                 const newWidth = Math.max(startWidth + deltaX, 28);
-                const colName = this.columns[idx];
                 this.$emit('resize-column', idx, newWidth);
             };
             const onMouseUp = () => {
@@ -232,7 +238,7 @@ export default {
                         <div class="resize-handle"
                              @mousedown.stop.prevent="startResizeColumn($event, idx)"
                              @click.stop.prevent
-                             @dblclick.stop.prevent="autoFitColumn(idx)"></div>
+                             @dblclick.stop.prevent="autoFitColumn($event, idx)"></div>
                     </th>
                 </tr>
             </thead>
@@ -250,7 +256,7 @@ export default {
                             'cell-search-match': cellMatchedSearch(row, col, idx)
                         }"
                         @contextmenu.prevent.stop="$emit('row-contextmenu', { event: $event, row, rowIndex: pageStart + i, column: col, columnIndex: idx })"
-                        @dblclick="showCellDetail(row, col, idx, pageStart + i, idx)">
+                        @dblclick="showCellDetail(row, col, idx, pageStart + i, idx, $event)">
                         <input v-if="row && row.__pendingInsert"
                                :value="getCellEditValue(row, col, idx)"
                                type="text"

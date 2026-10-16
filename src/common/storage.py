@@ -97,14 +97,6 @@ class Storage:
                 )
             """)
             conn.execute("""
-                CREATE TABLE IF NOT EXISTS project_workspaces (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    path TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            conn.execute("""
                 CREATE TABLE IF NOT EXISTS query_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     source_id INTEGER,
@@ -116,20 +108,6 @@ class Storage:
                     status TEXT DEFAULT 'success',
                     error_msg TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # 书签表
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS bookmarks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    source_id INTEGER NOT NULL,
-                    object_type TEXT NOT NULL,
-                    object_name TEXT NOT NULL,
-                    label TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (source_id) REFERENCES data_sources (id) ON DELETE CASCADE,
-                    UNIQUE(source_id, object_type, object_name)
                 )
             """)
             
@@ -153,20 +131,6 @@ class Storage:
                 conn.execute("ALTER TABLE data_sources ADD COLUMN group_id INTEGER REFERENCES connection_groups(id)")
             if 'is_favorite' not in columns:
                 conn.execute("ALTER TABLE data_sources ADD COLUMN is_favorite INTEGER DEFAULT 0")
-            
-            # SQL模板表
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS sql_templates (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    description TEXT,
-                    category TEXT DEFAULT 'custom',
-                    db_type TEXT,
-                    is_builtin INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
             
             conn.commit()
 
@@ -204,31 +168,39 @@ class Storage:
             return row[0] if row else ""
 
     def add_source(self, **kwargs) -> int:
-        keys = kwargs.keys()
-        placeholders = ", ".join(["?"] * len(keys))
-        columns = ", ".join(keys)
-        values = tuple(kwargs.values())
+        group_name = kwargs.pop("group_name", None)
         with sqlite3.connect(self.db_path) as conn:
+            kwargs["group_id"] = self._resolve_group_id(conn, group_name)
+            keys = kwargs.keys()
+            placeholders = ", ".join(["?"] * len(keys))
+            columns = ", ".join(keys)
             cursor = conn.execute(
                 f"INSERT INTO data_sources ({columns}) VALUES ({placeholders})",
-                values
+                tuple(kwargs.values())
             )
             return cursor.lastrowid
 
     def update_source(self, source_id: int, **kwargs):
-        set_clause = ", ".join([f"{k}=?" for k in kwargs.keys()])
-        values = tuple(kwargs.values()) + (source_id,)
         with sqlite3.connect(self.db_path) as conn:
+            if "group_name" in kwargs:
+                kwargs["group_id"] = self._resolve_group_id(conn, kwargs.pop("group_name"))
+            set_clause = ", ".join([f"{k}=?" for k in kwargs.keys()])
+            values = tuple(kwargs.values()) + (source_id,)
             conn.execute(
                 f"UPDATE data_sources SET {set_clause} WHERE id=?",
                 values
             )
+            self._prune_empty_groups(conn)
             conn.commit()
 
     def get_sources(self) -> List[Dict[str, Any]]:
+        """返回全部数据源，附带所属分组名 group_name。"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute("SELECT * FROM data_sources")
+            cursor = conn.execute(
+                "SELECT ds.*, g.name AS group_name FROM data_sources ds "
+                "LEFT JOIN connection_groups g ON ds.group_id = g.id ORDER BY ds.id"
+            )
             return [dict(row) for row in cursor.fetchall()]
 
     def get_source(self, source_id: int) -> Optional[Dict[str, Any]]:
@@ -241,47 +213,49 @@ class Storage:
     def delete_source(self, source_id: int):
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("DELETE FROM data_sources WHERE id = ?", (source_id,))
+            self._prune_empty_groups(conn)
             conn.commit()
 
-    def add_workspace(self, name: str, path: str) -> int:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                "INSERT INTO project_workspaces (name, path) VALUES (?, ?)",
-                (name, path),
-            )
-            return cursor.lastrowid
+    # ===== 连接分组 =====
+    # 分组按名称使用：保存连接时填写分组名，不存在则自动创建；没有连接的分组会被自动清理。
 
-    def update_workspace(self, workspace_id: int, **kwargs):
-        if not kwargs:
-            return
-        set_clause = ", ".join([f"{k}=?" for k in kwargs.keys()])
-        values = tuple(kwargs.values()) + (workspace_id,)
+    @staticmethod
+    def _resolve_group_id(conn: sqlite3.Connection, group_name: Optional[str]) -> Optional[int]:
+        name = (group_name or "").strip()
+        if not name:
+            return None
+        row = conn.execute("SELECT id FROM connection_groups WHERE name = ? ORDER BY id LIMIT 1", (name,)).fetchone()
+        if row:
+            return row[0]
+        return conn.execute("INSERT INTO connection_groups (name) VALUES (?)", (name,)).lastrowid
+
+    @staticmethod
+    def _prune_empty_groups(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "DELETE FROM connection_groups WHERE id NOT IN "
+            "(SELECT group_id FROM data_sources WHERE group_id IS NOT NULL)"
+        )
+
+    def rename_group(self, group_id: int, new_name: str) -> None:
+        """重命名分组；新名称已存在时合并到已有分组。"""
+        name = new_name.strip()
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                f"UPDATE project_workspaces SET {set_clause} WHERE id=?",
-                values,
-            )
+            row = conn.execute(
+                "SELECT id FROM connection_groups WHERE name = ? AND id != ? ORDER BY id LIMIT 1",
+                (name, group_id),
+            ).fetchone()
+            if row:
+                conn.execute("UPDATE data_sources SET group_id = ? WHERE group_id = ?", (row[0], group_id))
+                self._prune_empty_groups(conn)
+            else:
+                conn.execute("UPDATE connection_groups SET name = ? WHERE id = ?", (name, group_id))
             conn.commit()
 
-    def get_workspaces(self) -> List[Dict[str, Any]]:
+    def ungroup(self, group_id: int) -> None:
+        """解散分组：其中的连接移到未分组，不删除连接。"""
         with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute("SELECT * FROM project_workspaces ORDER BY id")
-            return [dict(row) for row in cursor.fetchall()]
-
-    def get_workspace(self, workspace_id: int) -> Optional[Dict[str, Any]]:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT * FROM project_workspaces WHERE id = ?",
-                (workspace_id,),
-            )
-            row = cursor.fetchone()
-            return dict(row) if row else None
-
-    def delete_workspace(self, workspace_id: int):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM project_workspaces WHERE id = ?", (workspace_id,))
+            conn.execute("UPDATE data_sources SET group_id = NULL WHERE group_id = ?", (group_id,))
+            self._prune_empty_groups(conn)
             conn.commit()
 
     def add_history(self, source_id=None, source_name=None, query="", executed_query="",
@@ -321,45 +295,6 @@ class Storage:
             conn.commit()
 
     # ========== 书签功能 ==========
-    def add_bookmark(self, source_id: int, object_type: str, object_name: str, label: str = None) -> int:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                "INSERT OR IGNORE INTO bookmarks (source_id, object_type, object_name, label) VALUES (?, ?, ?, ?)",
-                (source_id, object_type, object_name, label or object_name)
-            )
-            conn.commit()
-            return cursor.lastrowid
-
-    def remove_bookmark(self, source_id: int, object_type: str, object_name: str):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                "DELETE FROM bookmarks WHERE source_id = ? AND object_type = ? AND object_name = ?",
-                (source_id, object_type, object_name)
-            )
-            conn.commit()
-
-    def get_bookmarks(self, source_id: int = None) -> List[Dict[str, Any]]:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            if source_id:
-                cursor = conn.execute(
-                    "SELECT b.*, ds.name as source_name, ds.type as source_type FROM bookmarks b JOIN data_sources ds ON b.source_id = ds.id WHERE b.source_id = ? ORDER BY b.created_at DESC",
-                    (source_id,)
-                )
-            else:
-                cursor = conn.execute(
-                    "SELECT b.*, ds.name as source_name, ds.type as source_type FROM bookmarks b JOIN data_sources ds ON b.source_id = ds.id ORDER BY b.created_at DESC"
-                )
-            return [dict(row) for row in cursor.fetchall()]
-
-    def is_bookmarked(self, source_id: int, object_type: str, object_name: str) -> bool:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                "SELECT 1 FROM bookmarks WHERE source_id = ? AND object_type = ? AND object_name = ?",
-                (source_id, object_type, object_name)
-            )
-            return cursor.fetchone() is not None
-
     def toggle_favorite(self, source_id: int) -> bool:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("SELECT is_favorite FROM data_sources WHERE id = ?", (source_id,))

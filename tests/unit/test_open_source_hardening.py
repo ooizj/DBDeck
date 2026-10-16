@@ -1,10 +1,8 @@
 from contextlib import contextmanager
 from types import SimpleNamespace
 
-import pytest
 import sqlalchemy
 
-from src.api import search_routes
 from src.common.db_utils import quote_identifier, quote_qualified_identifier
 from src.services import compare_service, data_edit_service, import_service, session_service
 from src.sources.mongodb.tools import mongodb_tools
@@ -62,36 +60,6 @@ def test_sql_identifiers_are_quoted_instead_of_interpolated():
     assert quote_identifier("mysql", "odd`table") == "`odd``table`"
     assert quote_identifier("postgresql", "profile.name") == '"profile.name"'
     assert quote_qualified_identifier("postgresql", 'public.odd"table') == '"public"."odd""table"'
-
-
-@pytest.mark.asyncio
-async def test_search_uses_bound_values_and_quoted_identifiers(monkeypatch):
-    database = RecordingDatabase()
-    provider = SimpleNamespace(id="sqlite")
-
-    @contextmanager
-    def managed_source(_source_id):
-        yield provider, database
-
-    monkeypatch.setattr(search_routes, "managed_source", managed_source)
-    monkeypatch.setattr(
-        search_routes,
-        "get_table_columns",
-        lambda *_args: [{"name": "display name", "type": "TEXT"}],
-    )
-
-    result = await search_routes.search_data(
-        1,
-        'customers"; DROP TABLE audit; --',
-        "%' OR 1=1; --",
-        limit=10,
-    )
-
-    assert result["success"] is True
-    query, params = database.calls[-1]
-    assert 'FROM "customers""; DROP TABLE audit; --"' in query
-    assert "OR 1=1" not in query
-    assert params == {"search_value": "%%' OR 1=1; --%"}
 
 
 def test_compare_quotes_table_names(monkeypatch):
