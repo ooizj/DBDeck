@@ -3,16 +3,21 @@ setlocal
 chcp 65001 >nul
 cd /d "%~dp0"
 
+if exist "venv\Scripts\python.exe" goto :venv_ready
+
+echo [INFO] 未找到 venv，正在创建虚拟环境...
+where py >nul 2>nul
+if not errorlevel 1 (
+    py -3 -m venv venv
+) else (
+    python -m venv venv
+)
 if not exist "venv\Scripts\python.exe" (
-    echo [INFO] 未找到 venv，正在创建虚拟环境...
-    where py >nul 2>nul
-    if errorlevel 1 (
-        python -m venv venv || goto :error
-    ) else (
-        py -3 -m venv venv || goto :error
-    )
+    echo [ERROR] 虚拟环境创建失败，请确保已安装 Python 并添加到 PATH。
+    goto :error
 )
 
+:venv_ready
 echo [INFO] 安装/更新打包依赖...
 venv\Scripts\python.exe -m pip install -r requirements-build.txt || goto :error
 
