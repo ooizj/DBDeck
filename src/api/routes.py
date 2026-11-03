@@ -13,6 +13,7 @@ from src.api.data_edit_routes import router as data_edit_router
 from src.api.session_routes import router as session_router
 from src.api.explain_routes import router as explain_router
 from src.api.compare_routes import router as compare_router
+from src.api.table_search_routes import router as table_search_router
 
 router = APIRouter()
 
@@ -33,3 +34,4 @@ router.include_router(data_edit_router)
 router.include_router(session_router)
 router.include_router(explain_router)
 router.include_router(compare_router)
+router.include_router(table_search_router)

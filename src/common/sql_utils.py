@@ -81,6 +81,15 @@ def add_limit_to_sql(sql: str, limit: int = 100, dialect: str = "mysql") -> str:
     )
 
 
+def _can_replace_projection_for_count(query: exp.Expression) -> bool:
+    """投影列不影响结果行数时（无 DISTINCT / GROUP BY / HAVING / 聚合），计数可改为 SELECT 1。"""
+    if not isinstance(query, exp.Select):
+        return False
+    if any(query.args.get(key) for key in ("distinct", "group", "having")):
+        return False
+    return not any(expr.find(exp.AggFunc) for expr in query.expressions)
+
+
 def build_select_pagination(
     sql: str,
     *,
@@ -109,6 +118,9 @@ def build_select_pagination(
 
     count_target = parsed.copy()
     count_target.set("order", None)
+    if _can_replace_projection_for_count(count_target):
+        # 计数不需要原始列；派生表中列名重复（如 `x AS id, w.id`）在 MySQL/PG 会直接报错
+        count_target.set("expressions", [exp.Literal.number(1)])
     count_sql = (
         exp.select(exp.func("COUNT", exp.Star()).as_("__codex_total"))
         .from_(count_target.subquery(alias="__codex_count"))

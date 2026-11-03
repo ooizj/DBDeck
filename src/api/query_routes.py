@@ -17,6 +17,21 @@ async def get_metadata(source_id: int, key_pattern: Optional[str] = None):
     return query_service.get_metadata(source_id, key_pattern)
 
 
+@router.get("/metadata/databases")
+async def get_databases(source_id: int):
+    return query_service.get_databases(source_id)
+
+
+@router.get("/metadata/server-version")
+async def get_server_version(source_id: int):
+    return query_service.get_server_version(source_id)
+
+
+@router.get("/metadata/database-schema")
+async def get_database_schema(source_id: int, database: str):
+    return query_service.get_database_schema(source_id, database)
+
+
 @router.post("/execute-sql")
 async def execute_sql(request: SQLRequest):
     return query_service.execute_query(

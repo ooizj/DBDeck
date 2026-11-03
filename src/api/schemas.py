@@ -106,3 +106,30 @@ class BackupRequest(BaseModel):
 
 class SessionQuery(BaseModel):
     source_id: int
+
+
+class TableSearchTablesRequest(BaseModel):
+    source_id: int
+    databases: Optional[List[str]] = None
+    table_include: str = ""
+    table_exclude: str = ""
+
+
+class TableSearchPlanRequest(TableSearchTablesRequest):
+    keyword: str
+    column_types: Optional[List[str]] = None
+    column_name: str = ""
+    match_mode: str = "contains"
+    where: str = ""
+
+
+class TableSearchRequest(BaseModel):
+    source_id: int
+    database: str
+    table: str
+    keyword: str
+    column_types: Optional[List[str]] = None
+    column_name: str = ""
+    match_mode: str = "contains"
+    where: str = ""
+    limit: Optional[int] = 50  # 为空或 <= 0 表示不限

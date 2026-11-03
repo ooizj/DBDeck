@@ -225,8 +225,17 @@ class MySQLClient(DataSourceClient):
             logger.warning(f"Failed to fetch column metadata: {e}")
         return metadata
 
-    def get_schema(self) -> Dict[str, Any]:
-        database = self.engine.url.database
+    def server_version(self) -> str:
+        with self.engine.connect() as conn:
+            return str(conn.execute(text("SELECT VERSION()")).scalar() or "")
+
+    def list_databases(self) -> List[str]:
+        with self.engine.connect() as conn:
+            rows = conn.execute(text("SHOW DATABASES")).fetchall()
+        return [row[0] for row in rows]
+
+    def get_schema(self, database: Optional[str] = None) -> Dict[str, Any]:
+        database = database or self.engine.url.database
         if not database:
             raise ValueError("MySQL 数据库名称不能为空，请先选择或填写数据库名称")
         # 一次查询拿到所有表/视图的字段，避免逐表 SHOW CREATE TABLE 在大库上很慢
@@ -269,8 +278,8 @@ class MySQLClient(DataSourceClient):
             object_types[name] = "function" if str(routine_type).upper() == "FUNCTION" else "procedure"
         return object_types
 
-    def get_table_comments(self) -> Dict[str, str]:
-        database = self.engine.url.database
+    def get_table_comments(self, database: Optional[str] = None) -> Dict[str, str]:
+        database = database or self.engine.url.database
         if not database:
             return {}
         with self.engine.connect() as conn:

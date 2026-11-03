@@ -1,4 +1,5 @@
-import mysqlProvider from './mysql.js';
+import mysqlProvider, { sqlKeywords } from './mysql.js';
+import { createSqlCompletion } from '../utils/sqlCompletion.js';
 
 export default {
     ...mysqlProvider,
@@ -8,6 +9,11 @@ export default {
     editorLanguage: 'mysql',
     capabilities: { ddl: true, migrate: true, explain: true, backup: true, hasSchema: true },
     supportsCopyDDL: true,
+
+    // 不沿用 MySQL 的跨库与内置函数补全：SQLite 没有这些元数据，函数集也不同
+    registerCompletion(monaco, { getCurrentTables, getModelText }) {
+        return createSqlCompletion(monaco, { getCurrentTables, getModelText }, sqlKeywords);
+    },
 
     connFormFields: [
         {

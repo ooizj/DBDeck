@@ -191,6 +191,22 @@ const tableSuggestion = (monaco, table, range) => {
     };
 };
 
+const PLAIN_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_$]*$/;
+
+const databaseSuggestion = (monaco, database, range, inBacktick) => {
+    const name = inBacktick || PLAIN_IDENTIFIER.test(database) ? database : `\`${database.replace(/`/g, '``')}\``;
+    return {
+        label: database,
+        kind: monaco.languages.CompletionItemKind.Module,
+        insertText: `${name}.`,
+        detail: 'database',
+        sortText: `3_${database}`,
+        range,
+        // 插入 `库.` 后立刻弹出该库的表
+        command: { id: 'editor.action.triggerSuggest', title: '' },
+    };
+};
+
 const keywordSuggestion = (monaco, keyword, range) => ({
     label: keyword,
     kind: monaco.languages.CompletionItemKind.Keyword,
@@ -198,6 +214,21 @@ const keywordSuggestion = (monaco, keyword, range) => ({
     sortText: `2_${keyword}`,
     range,
 });
+
+const functionSuggestion = (monaco, fn, range) => {
+    const { CompletionItemInsertTextRule, CompletionItemTag } = monaco.languages;
+    return {
+        label: fn.name,
+        kind: monaco.languages.CompletionItemKind.Function,
+        insertText: `${fn.name}($0)`,
+        insertTextRules: CompletionItemInsertTextRule?.InsertAsSnippet,
+        detail: fn.signatures[0] || `${fn.name}()`,
+        documentation: [...fn.signatures.slice(1), fn.description].filter(Boolean).join('\n'),
+        sortText: `4_${fn.name}`,
+        tags: fn.deprecated && CompletionItemTag ? [CompletionItemTag.Deprecated] : undefined,
+        range,
+    };
+};
 
 const columnSuggestion = (monaco, column, range, tableName) => ({
     label: column.name,
@@ -301,29 +332,32 @@ const skipWhitespace = (text, index) => {
     return index;
 };
 
-/** 读取 schema.table 形式的名字，返回最后一段作为表名。 */
+/** 读取 db.table 形式的名字：name 为最后一段，database 为它前面的一段（没有则为空）。 */
 const readQualifiedName = (text, start) => {
-    let ident = readIdentifier(text, start);
+    const ident = readIdentifier(text, start);
     if (!ident) return null;
     let { name, end } = ident;
+    let database = '';
     while (text[end] === '.') {
         const part = readIdentifier(text, end + 1);
         if (!part) break;
+        database = name;
         name = part.name;
         end = part.end;
     }
-    return { name, end };
+    return { name, database, end };
 };
 
 const RELATION_START_REGEX = /\b(FROM|JOIN|UPDATE|INTO)\b/gi;
 
 const relationMapForStatement = (maskedStatement) => {
+    // alias -> { database, name }；referencedTables 按出现顺序去重
     const aliases = new Map();
-    const referencedTables = new Set();
-    const addAlias = (alias, tableName) => {
-        aliases.set(alias, tableName);
+    const referencedTables = new Map();
+    const addAlias = (alias, ref) => {
+        aliases.set(alias, ref);
         const lower = alias.toLowerCase();
-        if (!aliases.has(lower)) aliases.set(lower, tableName);
+        if (!aliases.has(lower)) aliases.set(lower, ref);
     };
 
     let match;
@@ -335,9 +369,10 @@ const relationMapForStatement = (maskedStatement) => {
             index = skipWhitespace(maskedStatement, index);
             const relation = readQualifiedName(maskedStatement, index);
             if (!relation || RELATION_KEYWORDS.has(relation.name.toUpperCase())) break;
-            const tableName = relation.name;
-            referencedTables.add(tableName);
-            addAlias(tableName, tableName);
+            const ref = { database: relation.database, name: relation.name };
+            const key = `${ref.database.toLowerCase()}.${ref.name.toLowerCase()}`;
+            if (!referencedTables.has(key)) referencedTables.set(key, ref);
+            addAlias(ref.name, ref);
             index = skipWhitespace(maskedStatement, relation.end);
 
             let aliasIdent = readIdentifier(maskedStatement, index);
@@ -346,7 +381,7 @@ const relationMapForStatement = (maskedStatement) => {
                 aliasIdent = readIdentifier(maskedStatement, index);
             }
             if (aliasIdent && !RELATION_KEYWORDS.has(aliasIdent.name.toUpperCase())) {
-                addAlias(aliasIdent.name, tableName);
+                addAlias(aliasIdent.name, ref);
                 index = skipWhitespace(maskedStatement, aliasIdent.end);
             }
 
@@ -354,7 +389,7 @@ const relationMapForStatement = (maskedStatement) => {
             index += 1;
         }
     }
-    return { aliases, referencedTables };
+    return { aliases, referencedTables: [...referencedTables.values()] };
 };
 
 const findTable = (tables, name) => {
@@ -365,13 +400,68 @@ const findTable = (tables, name) => {
     return tables.find(item => item.name.toLowerCase() === lower);
 };
 
-const resolveAlias = (aliases, alias) => aliases.get(alias) || aliases.get(alias.toLowerCase()) || alias;
+const resolveAlias = (aliases, alias) => (
+    aliases.get(alias) || aliases.get(alias.toLowerCase()) || { database: '', name: alias }
+);
 
-const referencedColumns = (monaco, tables, maskedStatement, range) => {
+const sameName = (a, b) => Boolean(a && b) && a.toLowerCase() === b.toLowerCase();
+
+/**
+ * 跨库元数据访问：只有数据源提供了 loadDatabases / loadDatabaseTables 时才启用。
+ * 当前库的表直接用 getCurrentTables()，其他库的表按需加载。
+ */
+const createCatalog = ({ getCurrentTables, getCurrentDatabase, loadDatabases, loadDatabaseTables, loadFunctions }) => {
+    const currentTables = () => getCurrentTables() || [];
+    const currentDatabase = () => (getCurrentDatabase ? getCurrentDatabase() || '' : '');
+    const supportsDatabases = typeof loadDatabases === 'function' && typeof loadDatabaseTables === 'function';
+
+    const databases = async () => {
+        if (!supportsDatabases) return [];
+        try {
+            return (await loadDatabases()) || [];
+        } catch (e) {
+            return [];
+        }
+    };
+
+    const findDatabase = async (name) => (await databases()).find(db => sameName(db, name));
+
+    /** 返回某个库的表；database 为空或为当前库时返回当前表，未知库返回 null。 */
+    const tablesOf = async (database) => {
+        if (!database || sameName(database, currentDatabase())) return currentTables();
+        const actual = await findDatabase(database);
+        if (!actual) return null;
+        try {
+            return (await loadDatabaseTables(actual)) || [];
+        } catch (e) {
+            return [];
+        }
+    };
+
+    const resolveTable = async (ref) => {
+        const tables = await tablesOf(ref.database);
+        // 未识别的前缀（如 PostgreSQL 的 schema）退回当前表
+        return findTable(tables || currentTables(), ref.name);
+    };
+
+    /** 当前服务器版本可用的内置函数；数据源未提供 loadFunctions 时为空。 */
+    const functions = async () => {
+        if (typeof loadFunctions !== 'function') return [];
+        try {
+            return (await loadFunctions()) || [];
+        } catch (e) {
+            return [];
+        }
+    };
+
+    return { currentTables, databases, tablesOf, resolveTable, functions, supportsDatabases };
+};
+
+const referencedColumns = async (monaco, catalog, maskedStatement, range) => {
     const { referencedTables } = relationMapForStatement(maskedStatement);
-    const scopedTables = referencedTables.size
-        ? [...referencedTables].map(name => findTable(tables, name)).filter(Boolean)
-        : tables;
+    const scopedTables = referencedTables.length
+        ? (await Promise.all(referencedTables.map(ref => catalog.resolveTable(ref)))).filter(Boolean)
+        : catalog.currentTables();
     const showTable = scopedTables.length > 1;
     const seen = new Set();
     const suggestions = [];
@@ -387,7 +477,9 @@ const QUALIFIER_REGEX = new RegExp(`[\`"]?(${IDENT}+)[\`"]?\\.[\`"]?${IDENT}*$`)
 const RELATION_POSITION_REGEX = new RegExp(
     `\\b(?:FROM|JOIN|UPDATE|INTO|TABLE)\\s+(?:[\`"]?${IDENT}+[\`"]?\\.)?[\`"]?${IDENT}*$`, 'i',
 );
-const RELATION_LIST_REGEX = new RegExp(`\\bFROM\\s+([^;()]*?,\\s*)[\`"]?${IDENT}*$`, 'i');
+const RELATION_LIST_REGEX = new RegExp(
+    `\\bFROM\\s+([^;()]*?,\\s*)(?:[\`"]?${IDENT}+[\`"]?\\.)?[\`"]?${IDENT}*$`, 'i',
+);
 
 const isRelationPosition = (maskedBeforeCursor) => {
     if (RELATION_POSITION_REGEX.test(maskedBeforeCursor)) return true;
@@ -400,13 +492,30 @@ const statementKindOf = (maskedStatement) => (
     maskedStatement.replace(/^[\s(]+/, '').match(/^([A-Za-z]+)/)?.[1]?.toUpperCase() || ''
 );
 
+/** 表名位置的补全：`库.` 之后给出该库的表，否则给出当前库的表和其他库名。 */
+const relationSuggestions = async (monaco, catalog, qualifier, range, inBacktick) => {
+    if (qualifier) {
+        const tables = await catalog.tablesOf(qualifier);
+        return (tables || catalog.currentTables()).map(table => tableSuggestion(monaco, table, range));
+    }
+    const tables = catalog.currentTables().map(table => tableSuggestion(monaco, table, range));
+    const databases = (await catalog.databases()).map(db => databaseSuggestion(monaco, db, range, inBacktick));
+    return [...tables, ...databases];
+};
+
+/** 表达式位置的函数补全：只在已输入函数名前缀时给出，避免空白处弹出几百个函数。 */
+const functionSuggestions = async (monaco, catalog, range) => {
+    if (range.endColumn <= range.startColumn) return [];
+    return (await catalog.functions()).map(fn => functionSuggestion(monaco, fn, range));
+};
+
 export const createSqlCompletion = (
     monaco,
-    { getCurrentTables, getModelText },
+    { getCurrentTables, getModelText, getCurrentDatabase, loadDatabases, loadDatabaseTables, loadFunctions },
     sqlKeywords,
 ) => ({
     triggerCharacters: ['.', ' ', '=', '`', '('],
-    provideCompletionItems: (model, position) => {
+    provideCompletionItems: async (model, position) => {
         const word = model.getWordUntilPosition(position);
         const range = {
             startLineNumber: position.lineNumber,
@@ -428,23 +537,27 @@ export const createSqlCompletion = (
         // 双引号在 MySQL 里通常是字符串：只在表名位置或 "x". 之后补全
         if (scanBefore.quote === '"' && !relationPosition && !qualifier) return { suggestions: [] };
 
-        const tables = getCurrentTables() || [];
+        const catalog = createCatalog({
+            getCurrentTables, getCurrentDatabase, loadDatabases, loadDatabaseTables, loadFunctions,
+        });
 
         if (qualifier && !relationPosition) {
             const { aliases } = relationMapForStatement(maskedStatement);
-            const table = findTable(tables, resolveAlias(aliases, qualifier));
+            const table = await catalog.resolveTable(resolveAlias(aliases, qualifier));
             return {
                 suggestions: (table?.columns || []).map(column => columnSuggestion(monaco, column, range)),
             };
         }
 
         if (relationPosition) {
-            return { suggestions: tables.map(table => tableSuggestion(monaco, table, range)) };
+            return {
+                suggestions: await relationSuggestions(monaco, catalog, qualifier, range, scanBefore.quote === '`'),
+            };
         }
 
         if (scanBefore.quote === '`') {
             // 反引号内：给出当前语句可用的字段
-            return { suggestions: referencedColumns(monaco, tables, maskedStatement, range) };
+            return { suggestions: await referencedColumns(monaco, catalog, maskedStatement, range) };
         }
 
         if (!shouldSuggestAfterWhitespace(textBeforeCursor)) return { suggestions: [] };
@@ -457,21 +570,23 @@ export const createSqlCompletion = (
         const allowedKeywords = new Set(sqlKeywords);
 
         if (statementKind === 'SELECT' || statementKind === 'WITH') {
-            const columns = referencedColumns(monaco, tables, maskedStatement, range);
+            const columns = await referencedColumns(monaco, catalog, maskedStatement, range);
             const keywords = selectKeywordsAtCursor(activeClause)
                 .filter(keyword => allowedKeywords.has(keyword))
                 .map(keyword => keywordSuggestion(monaco, keyword, range));
-            return { suggestions: [...columns, ...keywords] };
+            const functions = await functionSuggestions(monaco, catalog, range);
+            return { suggestions: [...columns, ...keywords, ...functions] };
         }
 
         if (COLUMN_STATEMENT_KINDS.has(statementKind)) {
-            // INSERT ... VALUES (...) 里填的是值，不提示字段
-            if (activeClause === 'VALUES') return { suggestions: [] };
-            const columns = referencedColumns(monaco, tables, maskedStatement, range);
+            const functions = await functionSuggestions(monaco, catalog, range);
+            // INSERT ... VALUES (...) 里填的是值，不提示字段，只提示函数
+            if (activeClause === 'VALUES') return { suggestions: functions };
+            const columns = await referencedColumns(monaco, catalog, maskedStatement, range);
             const keywords = dmlKeywordsAtCursor(statementKind, activeClause)
                 .filter(keyword => allowedKeywords.has(keyword))
                 .map(keyword => keywordSuggestion(monaco, keyword, range));
-            return { suggestions: [...columns, ...keywords] };
+            return { suggestions: [...columns, ...keywords, ...functions] };
         }
 
         return {

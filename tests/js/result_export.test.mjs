@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import ResultArea, { alignExportColumns, bytesToBase64 } from '../../web_ui/js/components/ResultArea.js';
+import { timestampedFilename } from '../../web_ui/js/utils/saveFile.js';
 
 
 test('successful native result export reports a saved file instead of copying text', async () => {
@@ -58,7 +59,7 @@ test('CSV export preserves nested MongoDB values as JSON', async () => {
 
     await ResultArea.methods.exportCSV.call(context);
 
-    assert.equal(saved.filename, 'query-result.csv');
+    assert.match(saved.filename, /^query-result_\d{8}_\d{6}\.csv$/);
     assert.match(saved.content, /"\{""name"":""Ada"",""tags"":\[""admin""\]\}"/);
     assert.doesNotMatch(saved.content, /\[object Object\]/);
 });
@@ -153,3 +154,9 @@ test('base64 conversion handles files larger than the call stack limit', () => {
     const encoded = bytesToBase64(bytes);
     assert.equal(Buffer.from(encoded, 'base64').equals(Buffer.from(bytes)), true);
 });
+
+
+test('export filenames carry local date and time', () => {
+    const at = new Date(2026, 0, 5, 9, 3, 7);
+    assert.equal(timestampedFilename('query-result', 'xlsx', at), 'query-result_20260105_090307.xlsx');
+})

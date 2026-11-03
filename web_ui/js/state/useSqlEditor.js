@@ -77,6 +77,86 @@ export function useSqlEditor({
         }
     };
 
+    // 补全用的元数据缓存：sourceId -> { expiresAt, serverVersion: Promise, databases: Promise, schemas: Map<db, Promise> }
+    const CROSS_DB_CACHE_TTL_MS = 5 * 60 * 1000;
+    const crossDbCache = new Map();
+
+    const crossDbEntry = () => {
+        const source = getCurrentSource();
+        if (!source) return null;
+        let entry = crossDbCache.get(source.id);
+        if (!entry || entry.expiresAt < Date.now()) {
+            entry = {
+                sourceId: source.id,
+                expiresAt: Date.now() + CROSS_DB_CACHE_TTL_MS,
+                serverVersion: null,
+                databases: null,
+                schemas: new Map(),
+            };
+            crossDbCache.set(source.id, entry);
+        }
+        return entry;
+    };
+
+    // 请求失败时移除缓存，下次补全重新请求
+    const cached = (promise, onFailure) => promise.catch((e) => {
+        onFailure();
+        throw e;
+    });
+
+    const loadServerVersion = () => {
+        const entry = crossDbEntry();
+        if (!entry) return Promise.resolve('');
+        if (!entry.serverVersion) {
+            entry.serverVersion = cached(
+                dbService.getServerVersion(entry.sourceId).then((res) => {
+                    if (!res.success) throw new Error(res.error || '获取服务器版本失败');
+                    return res.version || '';
+                }),
+                () => { entry.serverVersion = null; },
+            );
+        }
+        return entry.serverVersion;
+    };
+
+    const loadDatabases = () => {
+        const entry = crossDbEntry();
+        if (!entry) return Promise.resolve([]);
+        if (!entry.databases) {
+            entry.databases = cached(
+                dbService.getDatabases(entry.sourceId).then((res) => {
+                    if (!res.success) throw new Error(res.error || '获取数据库列表失败');
+                    return res.databases || [];
+                }),
+                () => { entry.databases = null; },
+            );
+        }
+        return entry.databases;
+    };
+
+    const loadDatabaseTables = (database) => {
+        const entry = crossDbEntry();
+        if (!entry || !database) return Promise.resolve([]);
+        if (!entry.schemas.has(database)) {
+            entry.schemas.set(database, cached(
+                dbService.getDatabaseSchema(entry.sourceId, database).then((res) => {
+                    if (!res.success) throw new Error(res.error || '获取表结构失败');
+                    const comments = res.table_comments || {};
+                    return Object.entries(res.tables || {}).map(([name, columns]) => ({
+                        name,
+                        type: 'table',
+                        object_type: 'table',
+                        comment: comments[name] || '',
+                        columns,
+                        database,
+                    }));
+                }),
+                () => { entry.schemas.delete(database); },
+            ));
+        }
+        return entry.schemas.get(database);
+    };
+
     const completionForProvider = (provider) => {
         if (!provider) return null;
         if (!providerCompletions.has(provider.id)) {
@@ -84,6 +164,9 @@ export function useSqlEditor({
                 getCurrentTables,
                 getCurrentSource,
                 getModelText: getValue,
+                loadDatabases,
+                loadDatabaseTables,
+                loadServerVersion,
             });
             providerCompletions.set(provider.id, completion?.provideCompletionItems ? completion : null);
         }

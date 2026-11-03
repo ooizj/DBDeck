@@ -7,9 +7,10 @@ import SessionModal from './SessionModal.js';
 import BackupModal from './BackupModal.js';
 import ExplainModal from './ExplainModal.js';
 import CompareModal from './CompareModal.js';
+import TableSearchModal from './TableSearchModal.js';
 
 export default {
-    components: { ConfirmModal, SettingsModal, SourceFormModal, MigrateModal, DDLModal, SessionModal, BackupModal, ExplainModal, CompareModal },
+    components: { ConfirmModal, SettingsModal, SourceFormModal, MigrateModal, DDLModal, SessionModal, BackupModal, ExplainModal, CompareModal, TableSearchModal },
     props: [
         'showAddModal', 'isEditing', 'newSource', 'isTesting', 'isLoading', 'groupNames',
         'showMigrateModal', 'migrateSourceId', 'migrateDestId', 'migrateTables', 'selectedMigrateTables', 'sources', 'migrateTablesLoading', 'migrateTablesError',
@@ -21,6 +22,7 @@ export default {
         'showBackupModal', 'backupSourceId', 'backupSourceName', 'backupTables',
         'showExplainModal', 'explainSourceId', 'explainQuery',
         'showCompareModal', 'compareSourceId', 'compareSourceType', 'compareTables',
+        'showTableSearchModal', 'tableSearchSource',
     ],
     emits: [
         'close-add', 'test-connection', 'save-source', 'discover-databases',
@@ -34,6 +36,7 @@ export default {
         'close-backup',
         'close-explain',
         'close-compare',
+        'close-table-search', 'copy-sql',
     ],
     template: `
         <div>
@@ -79,6 +82,11 @@ export default {
                 :show="showCompareModal" :source-id="compareSourceId" :tables="compareTables"
                 :source-type="compareSourceType"
                 @close="$emit('close-compare')" />
+            <table-search-modal v-if="showTableSearchModal && tableSearchSource"
+                :show="showTableSearchModal" :source-id="tableSearchSource.id"
+                :source-type="tableSearchSource.db_type" :source-name="tableSearchSource.name"
+                @close="$emit('close-table-search')"
+                @copy="(sql) => $emit('copy-sql', sql)" />
         </div>
     `,
 };

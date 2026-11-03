@@ -43,6 +43,65 @@ def get_metadata(source_id: int, key_pattern: Optional[str] = None) -> dict[str,
             db.close()
 
 
+def get_databases(source_id: int) -> dict[str, Any]:
+    """列出当前连接所在服务器上的数据库，用于 SQL 补全里的 `库.表`。"""
+    db = None
+    try:
+        _, db = resolve_source(source_id)
+        list_databases = getattr(db, "list_databases", None)
+        if not callable(list_databases):
+            return {"success": True, "databases": []}
+        return {"success": True, "databases": list_databases()}
+    except Exception as e:
+        return {"success": False, "error": redact_sensitive(e)}
+    finally:
+        if db:
+            db.close()
+
+
+def get_server_version(source_id: int) -> dict[str, Any]:
+    """返回服务器版本号（如 8.0.36），用于 SQL 补全按版本提示内置函数。"""
+    db = None
+    try:
+        _, db = resolve_source(source_id)
+        server_version = getattr(db, "server_version", None)
+        if not callable(server_version):
+            return {"success": True, "version": ""}
+        return {"success": True, "version": server_version()}
+    except Exception as e:
+        return {"success": False, "error": redact_sensitive(e)}
+    finally:
+        if db:
+            db.close()
+
+
+def get_database_schema(source_id: int, database: str) -> dict[str, Any]:
+    """读取同一服务器上另一个数据库的表、字段和表注释，用于 SQL 补全。"""
+    db = None
+    try:
+        _, db = resolve_source(source_id)
+        list_databases = getattr(db, "list_databases", None)
+        if not callable(list_databases):
+            return {"success": False, "error": "当前数据源不支持跨库元数据"}
+        if database not in list_databases():
+            return {"success": False, "error": f"数据库不存在: {database}"}
+        try:
+            table_comments = db.get_table_comments(database)
+        except Exception:
+            table_comments = {}
+        return {
+            "success": True,
+            "database": database,
+            "tables": db.get_schema(database),
+            "table_comments": table_comments,
+        }
+    except Exception as e:
+        return {"success": False, "error": redact_sensitive(e)}
+    finally:
+        if db:
+            db.close()
+
+
 def _result_total(result: dict[str, Any]) -> int | None:
     statements = result.get("statements") or []
     active = statements[-1] if statements else result

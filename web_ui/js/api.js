@@ -55,6 +55,12 @@ export const dbService = {
         if (options.keyPattern) params.set('key_pattern', options.keyPattern);
         return fetchApi(`/metadata?${params.toString()}`);
     },
+    getServerVersion: (sourceId) => fetchApi(`/metadata/server-version?${new URLSearchParams({ source_id: sourceId })}`),
+    getDatabases: (sourceId) => fetchApi(`/metadata/databases?${new URLSearchParams({ source_id: sourceId })}`),
+    getDatabaseSchema: (sourceId, database) => {
+        const params = new URLSearchParams({ source_id: sourceId, database });
+        return fetchApi(`/metadata/database-schema?${params.toString()}`);
+    },
     getDDL: (tableName, sourceId) => {
         const params = new URLSearchParams({ table_name: tableName, source_id: sourceId });
         return fetchApi(`/metadata/ddl?${params.toString()}`);
@@ -154,4 +160,9 @@ export const dbService = {
         const params = new URLSearchParams({ source_id: sourceId, table1, table2 });
         return fetchApi(`/compare/structure?${params}`);
     },
+    // ========== 全表搜索 ==========
+    getTableSearchDatabases: (sourceId) => fetchApi(`/table-search/databases?${new URLSearchParams({ source_id: sourceId })}`),
+    listTableSearchTables: (payload) => fetchApi('/table-search/tables', { method: 'POST', body: JSON.stringify(payload) }),
+    planTableSearch: (payload) => fetchApi('/table-search/plan', { method: 'POST', body: JSON.stringify(payload) }),
+    searchTable: (payload) => fetchApi('/table-search/table', { method: 'POST', body: JSON.stringify(payload) }),
 };

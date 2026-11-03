@@ -146,6 +146,26 @@ const app = createApp({
             showCompareModal.value = true;
         };
 
+        // ========== 全表搜索 ==========
+        const showTableSearchModal = ref(false);
+        const tableSearchSource = ref(null);
+        const supportsTableSearch = (source) => ['mysql', 'postgresql', 'sqlite'].includes(source?.db_type);
+
+        const openTableSearch = (source = null) => {
+            contextMenu.show = false;
+            const target = source || currentSource.value;
+            if (!target) {
+                notify('请先在左侧选择一个连接，再搜索其中的数据', 'warning');
+                return;
+            }
+            if (!supportsTableSearch(target)) {
+                notify(`${getProvider(target.db_type).displayName} 不支持全表搜索`, 'warning');
+                return;
+            }
+            tableSearchSource.value = target;
+            showTableSearchModal.value = true;
+        };
+
         // File Import
         const showImportModal = ref(false);
         const importSourceId = ref(null);
@@ -1279,6 +1299,10 @@ const app = createApp({
             // 结构比较功能
             showCompareModal, compareSourceId, compareSourceType, compareTables,
             openCompareTool,
+
+            // 全表搜索
+            showTableSearchModal, tableSearchSource, supportsTableSearch,
+            openTableSearch,
 
             // From redis composable (spread flat for template compatibility)
             redisKeyPattern: redis.redisKeyPattern,

@@ -2,6 +2,9 @@ import ResultTable from './ResultTable.js?v=result-table-20261016';
 import { buildMongoInsertOneCommand } from '../utils/mongoCommands.js';
 import { buildRedisSetCommand, formatRedisArgument } from '../utils/redisCommands.js';
 import { formatSqlLiteral } from '../utils/sqlHelpers.js';
+import { bytesToBase64, saveFile, timestampedFilename } from '../utils/saveFile.js';
+
+export { bytesToBase64 };
 
 // 后端按原始列顺序返回；若用户在界面上拖动调整过列顺序，且列名唯一，则按界面顺序重排
 export function alignExportColumns(displayColumns, columns, rows) {
@@ -17,15 +20,6 @@ export function alignExportColumns(displayColumns, columns, rows) {
     };
 }
 
-// 大文件直接展开 String.fromCharCode(...bytes) 会超出调用栈，分块转换
-export function bytesToBase64(bytes) {
-    let binary = '';
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-    }
-    return btoa(binary);
-}
 
 export default {
     inject: ['dbService'],
@@ -714,7 +708,7 @@ export default {
                     return `"${str}"`;
                 }).join(','));
             }
-            await this._saveFile(csvRows.join('\n'), 'query-result.csv', '*.csv|*.txt');
+            await this._saveFile(csvRows.join('\n'), timestampedFilename('query-result', 'csv'), '*.csv|*.txt');
         },
         async exportJSON() {
             this.closeExportMenu();
@@ -726,7 +720,7 @@ export default {
                 cols.forEach((col, idx) => { obj[col] = this.getCellValue(row, col, idx); });
                 return obj;
             });
-            await this._saveFile(JSON.stringify(data, null, 2), 'query-result.json', '*.json');
+            await this._saveFile(JSON.stringify(data, null, 2), timestampedFilename('query-result', 'json'), '*.json');
         },
         async exportXLSX() {
             this.closeExportMenu();
@@ -752,7 +746,7 @@ export default {
             XLSX.utils.book_append_sheet(wb, ws, 'Results');
             const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
             const b64 = 'base64:' + bytesToBase64(new Uint8Array(wbout));
-            await this._saveFile(b64, 'query-result.xlsx', '*.xlsx');
+            await this._saveFile(b64, timestampedFilename('query-result', 'xlsx'), '*.xlsx');
         },
         async exportSQLInsert() {
             this.closeExportMenu();
@@ -768,7 +762,7 @@ export default {
                 const quotedColumns = cols.map(col => this.sqlIdentifier(col)).join(', ');
                 return `INSERT INTO ${this.sqlIdentifier(tableName)} (${quotedColumns}) VALUES (${vals});`;
             });
-            await this._saveFile(lines.join('\n'), 'query-result.sql', '*.sql|*.txt');
+            await this._saveFile(lines.join('\n'), timestampedFilename('query-result', 'sql'), '*.sql|*.txt');
         },
         async exportMarkdown() {
             this.closeExportMenu();
@@ -782,51 +776,10 @@ export default {
                     .replace(/\|/g, '\\|')
                     .replace(/\r?\n/g, '<br>')).join(' | ') + ' |'
             ).join('\n');
-            await this._saveFile(header + '\n' + sep + '\n' + body, 'query-result.md', '*.md|*.txt');
+            await this._saveFile(header + '\n' + sep + '\n' + body, timestampedFilename('query-result', 'md'), '*.md|*.txt');
         },
-        async _saveFile(content, filename, fileTypes) {
-            if (window.pywebview?.api?.save_file) {
-                try {
-                    const res = await window.pywebview.api.save_file(filename, content, fileTypes || '');
-                    if (res?.success) {
-                        ElementPlus.ElMessage.success('文件已保存到 ' + res.path);
-                        return;
-                    }
-                    if (res?.cancelled) return;
-                    ElementPlus.ElMessage.error('保存失败: ' + (res?.error || '未知错误'));
-                    return;
-                } catch (e) {
-                    ElementPlus.ElMessage.error('保存异常: ' + e.message);
-                    return;
-                }
-            }
-            if (window.showSaveFilePicker && !content.startsWith('base64:')) {
-                try {
-                    const handle = await window.showSaveFilePicker({
-                        suggestedName: filename,
-                        types: [{ description: 'Data', accept: { 'application/octet-stream': [filename.replace(/.*\./, '.')] } }],
-                    });
-                    const writable = await handle.createWritable();
-                    await writable.write(new Blob([content], { type: 'text/plain;charset=utf-8' }));
-                    await writable.close();
-                    ElementPlus.ElMessage.success('文件已保存');
-                    return;
-                } catch (e) {
-                    if (e.name === 'AbortError') return;
-                }
-            }
-            const blob = content.startsWith('base64:')
-                ? new Blob([Uint8Array.from(atob(content.slice(7)), c => c.charCodeAt(0))])
-                : new Blob([content], { type: 'text/plain;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-            ElementPlus.ElMessage.success('文件已开始下载');
+        _saveFile(content, filename, fileTypes) {
+            return saveFile(content, filename, fileTypes);
         },
     },
     template: `

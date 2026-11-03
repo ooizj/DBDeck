@@ -1,6 +1,7 @@
 import { createSqlCompletion } from '../utils/sqlCompletion.js';
+import { mysqlFunctionsForVersion } from '../utils/sqlFunctions.js';
 
-const sqlKeywords = [
+export const sqlKeywords = [
     'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'LIKE', 'BETWEEN',
     'IS NULL', 'IS NOT NULL', 'ORDER BY', 'GROUP BY', 'HAVING', 'ASC', 'DESC',
     'LIMIT', 'OFFSET', 'DISTINCT', 'UNION', 'JOIN', 'LEFT JOIN', 'RIGHT JOIN',
@@ -26,8 +27,19 @@ export default {
         { key: 'database', label: '数据库名称', type: 'database-discover', flex: 1, placeholder: '例如: test' },
     ],
 
-    registerCompletion(monaco, { getCurrentTables, getModelText }) {
-        return createSqlCompletion(monaco, { getCurrentTables, getModelText }, sqlKeywords);
+    registerCompletion(monaco, ctx) {
+        // 同一 MySQL 服务器上可以 `库.表` 跨库查询，补全时按需加载其他库的元数据
+        return createSqlCompletion(monaco, {
+            getCurrentTables: ctx.getCurrentTables,
+            getModelText: ctx.getModelText,
+            getCurrentDatabase: () => ctx.getCurrentSource?.()?.database || '',
+            loadDatabases: ctx.loadDatabases,
+            loadDatabaseTables: ctx.loadDatabaseTables,
+            // 按服务器版本提示内置函数
+            loadFunctions: ctx.loadServerVersion
+                ? async () => mysqlFunctionsForVersion(await ctx.loadServerVersion())
+                : undefined,
+        }, sqlKeywords);
     },
 
     buildSelectQuery(table) {
