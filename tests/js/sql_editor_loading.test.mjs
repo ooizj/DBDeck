@@ -6,6 +6,7 @@ import {
     updateEditorReadOnly,
 } from '../../web_ui/js/utils/editorState.js';
 import SqlEditor from '../../web_ui/js/components/SqlEditor.js';
+import { t } from '../../web_ui/js/i18n/index.js';
 
 
 test('SQL editor is locked while the selected database is loading', () => {
@@ -35,5 +36,6 @@ test('changing editor read-only state preserves the current SQL', () => {
 test('SQL editor disables actions and explains the loading lock', () => {
     assert.ok(SqlEditor.props.includes('disabled'));
     assert.match(SqlEditor.template, /:disabled="disabled \|\| !currentSource"/);
-    assert.match(SqlEditor.template, /数据库加载中，SQL 暂时只读/);
+    assert.match(SqlEditor.template, /v-if="disabled">\{\{ \$t\('editor\.readOnlyLoading'\) \}\}/);
+    assert.equal(t('editor.readOnlyLoading'), '数据库加载中，编辑器暂时只读');
 });

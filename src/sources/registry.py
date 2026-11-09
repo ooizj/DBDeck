@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Dict, List
 
 from .base import SourceProvider
+from src.common.i18n import msg
 
 _providers: Dict[str, SourceProvider] = {}
 
@@ -18,7 +19,7 @@ def register_provider(provider: SourceProvider) -> None:
 
 def get_provider(source_type: str) -> SourceProvider:
     if source_type not in _providers:
-        raise ValueError(f"未知数据源类型: {source_type}")
+        raise ValueError(msg(f"未知数据源类型: {source_type}", f"Unknown data source type: {source_type}"))
     return _providers[source_type]
 
 

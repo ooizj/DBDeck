@@ -10,6 +10,7 @@ from src.common.errors import redact_sensitive, secrets_from_config
 from src.sources.base import DataSourceClient
 from src.sources.operation_policy import classify_redis
 from src.sources.ssh_tunnel import close_ssh_tunnel, open_ssh_tunnel
+from src.common.i18n import msg
 
 try:
     import redis
@@ -84,7 +85,7 @@ def _redis_connection_kwargs(
 class RedisClient(DataSourceClient):
     def __init__(self, config_dict: Dict[str, Any]) -> None:
         if not redis:
-            raise ImportError("redis 未安装，请先 pip install redis")
+            raise ImportError(msg("redis 未安装，请先 pip install redis", "redis is not installed; run pip install redis"))
         self.config = config_dict
         self.database_name = str(_db_index(config_dict))
         host = config_dict.get("host") or "localhost"
@@ -108,8 +109,8 @@ class RedisClient(DataSourceClient):
         if not statements:
             return {
                 "success": False,
-                "error": "Redis 命令不能为空",
-                "error_msg": "Redis 命令不能为空",
+                "error": msg("Redis 命令不能为空", "The Redis command is empty"),
+                "error_msg": msg("Redis 命令不能为空", "The Redis command is empty"),
                 "statements": [],
                 "duration_ms": round((time.perf_counter() - total_start) * 1000, 2),
             }
@@ -166,8 +167,8 @@ class RedisClient(DataSourceClient):
             return self._with_duration(
                 {
                     "success": False,
-                    "error": f"Redis 命令解析失败: {e}",
-                    "error_msg": f"Redis 命令解析失败: {e}",
+                    "error": msg(f"Redis 命令解析失败: {e}", f"Failed to parse the Redis command: {e}"),
+                    "error_msg": msg(f"Redis 命令解析失败: {e}", f"Failed to parse the Redis command: {e}"),
                 },
                 statement_start,
             )
@@ -175,8 +176,8 @@ class RedisClient(DataSourceClient):
             return self._with_duration(
                 {
                     "success": False,
-                    "error": "Redis 命令不能为空",
-                    "error_msg": "Redis 命令不能为空",
+                    "error": msg("Redis 命令不能为空", "The Redis command is empty"),
+                    "error_msg": msg("Redis 命令不能为空", "The Redis command is empty"),
                 },
                 statement_start,
             )
@@ -409,7 +410,7 @@ class RedisClient(DataSourceClient):
                 schema[str(key)] = [
                     {"name": "type", "type": key_type, "nullable": False, "comment": ""},
                     {"name": "ttl", "type": _display_ttl(int(ttl)), "nullable": True, "comment": ""},
-                    {"name": "length", "type": "", "nullable": True, "comment": "打开 key 后加载"},
+                    {"name": "length", "type": "", "nullable": True, "comment": msg("打开 key 后加载", "Loaded when the key is opened")},
                 ]
         except Exception as e:
             logger.error(

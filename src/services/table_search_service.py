@@ -27,6 +27,7 @@ from src.common.db_utils import managed_source
 from src.common.errors import redact_sensitive
 from src.common.sql_identifiers import quote_identifier
 from src.common.sql_utils import serialize_row, serialize_value
+from src.common.i18n import msg
 
 SUPPORTED_PROVIDERS = ("mysql", "postgresql", "sqlite")
 CATEGORIES = ("string", "number", "datetime")
@@ -142,7 +143,7 @@ def _parse_time(keyword: str) -> Optional[TimeKeyword]:
 def parse_keyword(keyword: str) -> KeywordInfo:
     value = (keyword or "").strip()
     if not value:
-        raise ValueError("关键字不能为空")
+        raise ValueError(msg("关键字不能为空", "The keyword cannot be empty"))
     number = None
     if _NUMBER_RE.match(value):
         try:
@@ -236,7 +237,7 @@ def _datetime_kind(type_name: str) -> str:
 
 def _require_supported(provider) -> None:
     if provider.id not in SUPPORTED_PROVIDERS:
-        raise ValueError(f"{provider.display_name or provider.id} 暂不支持全表搜索")
+        raise ValueError(msg(f"{provider.display_name or provider.id} 暂不支持全表搜索", f"{provider.display_name or provider.id} does not support searching all tables"))
 
 
 def _list_databases(provider, db) -> Tuple[List[str], str]:
@@ -269,7 +270,7 @@ def _resolve_databases(provider, db, databases: Optional[Sequence[str]]) -> List
         return names
     missing = [d for d in wanted if d not in names]
     if missing:
-        raise ValueError(f"数据库不存在: {', '.join(missing)}")
+        raise ValueError(msg(f"数据库不存在: {', '.join(missing)}", f"Database does not exist: {', '.join(missing)}"))
     return wanted
 
 
@@ -282,7 +283,7 @@ def _check_database_name(provider_id: str, database: str) -> None:
         or (provider_id == "postgresql" and (lowered in POSTGRES_SYSTEM_SCHEMAS or lowered.startswith(("pg_toast", "pg_temp"))))
         or (provider_id == "sqlite" and database != "main")
     ):
-        raise ValueError(f"不支持搜索该数据库: {database}")
+        raise ValueError(msg(f"不支持搜索该数据库: {database}", f"This database cannot be searched: {database}"))
 
 
 def _load_columns(provider, db, databases: Sequence[str], table: Optional[str] = None) -> Dict[Tuple[str, str], List[Dict[str, Any]]]:
@@ -396,17 +397,20 @@ def parse_where_filter(provider_id: str, where: Optional[str]) -> Tuple[Optional
     if re.match(r"(?i)^where\b", value):
         value = value[5:].strip()
     if ";" in value:
-        raise ValueError("过滤条件不能包含分号")
+        raise ValueError(msg("过滤条件不能包含分号", "The filter cannot contain semicolons"))
     try:
         statements = sqlglot.parse(f"SELECT * FROM dbdeck_t WHERE {value}", read=_SQLGLOT_DIALECTS[provider_id])
     except sqlglot.errors.SqlglotError as e:
-        raise ValueError(f"过滤条件语法错误: {value}") from e
+        raise ValueError(msg(f"过滤条件语法错误: {value}", f"Syntax error in the filter: {value}")) from e
     if len(statements) != 1 or not isinstance(statements[0], exp.Select) or not statements[0].args.get("where"):
-        raise ValueError(f"过滤条件无效: {value}")
+        raise ValueError(msg(f"过滤条件无效: {value}", f"Invalid filter: {value}"))
     select = statements[0]
     extra_args = {k for k, v in select.args.items() if v and k not in ("expressions", "from", "from_", "where")}
     if extra_args:
-        raise ValueError(f"过滤条件只能是条件表达式，不能包含 {', '.join(sorted(extra_args)).upper()}")
+        raise ValueError(msg(
+            f"过滤条件只能是条件表达式，不能包含 {', '.join(sorted(extra_args)).upper()}",
+            f"The filter must be a condition only and cannot contain {', '.join(sorted(extra_args)).upper()}",
+        ))
     columns = []
     for col in select.args["where"].find_all(exp.Column):
         # 只收集属于本表的字段，子查询里的字段不算
@@ -688,11 +692,17 @@ def plan_search(
                 targets.append({"database": database, "table": table_name, "columns": candidates})
         warnings = []
         if categories == ["number"] and info.number is None:
-            warnings.append("关键字不是数字，数字字段不会参与搜索")
+            warnings.append(msg("关键字不是数字，数字字段不会参与搜索", "The keyword is not a number, so numeric columns are not searched"))
         if categories == ["datetime"] and info.date is None and info.time is None:
-            warnings.append("关键字不是可识别的日期/时间（如 2024-01、2024-01-15、2024-01-15 10:30、10:30），日期字段不会参与搜索")
+            warnings.append(msg(
+                "关键字不是可识别的日期/时间（如 2024-01、2024-01-15、2024-01-15 10:30、10:30），日期字段不会参与搜索",
+                "The keyword is not a recognizable date/time (e.g. 2024-01, 2024-01-15, 2024-01-15 10:30, 10:30), so date columns are not searched",
+            ))
         if skipped_by_filter:
-            warnings.append(f"{len(skipped_by_filter)} 张表缺少过滤条件里的字段，已跳过")
+            warnings.append(msg(
+                f"{len(skipped_by_filter)} 张表缺少过滤条件里的字段，已跳过",
+                f"Skipped {len(skipped_by_filter)} tables that lack the columns used in the filter",
+            ))
         return {
             "success": True,
             "databases": targets_db,
@@ -732,10 +742,13 @@ def search_table(
             _check_database_name(provider.id, database)
             columns = _load_columns(provider, db, [database], table).get((database, table))
             if columns is None:
-                return {**base, "success": False, "error": f"表不存在: {database}.{table}"}
+                return {**base, "success": False, "error": msg(f"表不存在: {database}.{table}", f"Table does not exist: {database}.{table}")}
             missing = _missing_filter_columns(columns, filter_columns)
             if missing:
-                return {**base, "success": False, "error": f"表中没有过滤条件里的字段: {', '.join(missing)}"}
+                return {**base, "success": False, "error": msg(
+                    f"表中没有过滤条件里的字段: {', '.join(missing)}",
+                    f"The table lacks the columns used in the filter: {', '.join(missing)}",
+                )}
             candidates = _candidate_columns(provider.id, columns, info, categories, column_name)
             if not candidates:
                 return {**base, "success": True, "columns": [], "rows": [], "matched": [], "record_ids": [],

@@ -37,13 +37,13 @@ export default {
     template: `
         <div class="editor-area" :style="{ height: editorHeight + 'px' }">
             <div class="toolbar">
-                <el-button @click="$emit('execute')" :disabled="disabled || !currentSource" :title="'运行选中语句或当前语句（' + runShortcut + '）'">▶ 运行（{{ runShortcut }}）</el-button>
-                <el-button @click="$emit('format')" :disabled="disabled" title="格式化 SQL">⟳ 格式化</el-button>
-                <el-button v-if="canExplain" @click="$emit('explain')" :disabled="disabled" title="分析选中语句或当前语句的执行计划">⌗ 执行计划</el-button>
-                <el-button v-if="isRedis" @click="showRedisCommands = !showRedisCommands" :disabled="disabled" title="查看 Redis 常用命令">命令参考</el-button>
-                <span class="editor-toolbar-context muted" v-if="disabled">数据库加载中，SQL 暂时只读</span>
+                <el-button @click="$emit('execute')" :disabled="disabled || !currentSource" :title="$t('editor.runTitle', { shortcut: runShortcut })">▶ {{ $t('editor.run', { shortcut: runShortcut }) }}</el-button>
+                <el-button @click="$emit('format')" :disabled="disabled" :title="$t('editor.formatTitle')">⟳ {{ $t('editor.format') }}</el-button>
+                <el-button v-if="canExplain" @click="$emit('explain')" :disabled="disabled" :title="$t('editor.explainTitle')">⌗ {{ $t('editor.explain') }}</el-button>
+                <el-button v-if="isRedis" @click="showRedisCommands = !showRedisCommands" :disabled="disabled" :title="$t('editor.redisCommandsTitle')">{{ $t('editor.redisCommands') }}</el-button>
+                <span class="editor-toolbar-context muted" v-if="disabled">{{ $t('editor.readOnlyLoading') }}</span>
                 <span class="editor-toolbar-context" v-else-if="currentSource">{{ currentSource.database }}</span>
-                <span class="editor-toolbar-context muted" v-else>未选择连接</span>
+                <span class="editor-toolbar-context muted" v-else>{{ $t('editor.noConnection') }}</span>
             </div>
             <div v-if="isRedis && showRedisCommands" class="redis-command-help">
                 <div v-for="group in redisCommandGroups" :key="group.title" class="redis-command-group">
@@ -53,7 +53,7 @@ export default {
                         :key="command"
                         class="redis-command-chip"
                         @click="copyCommand(command)"
-                        :title="'复制: ' + command">
+                        :title="$t('editor.copyCommand', { command })">
                         {{ command }}
                     </button>
                 </div>

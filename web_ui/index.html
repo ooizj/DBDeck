@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DBDeck</title>
     <link rel="stylesheet" href="vendor/element-plus.css?v=2">
-    <link rel="stylesheet" href="css/style.css?v=21">
+    <link rel="stylesheet" href="css/style.css?v=26">
     <script src="vendor/vue.global.prod.js"
             integrity="sha384-H2xBKUDQ/xne/c7DBZjrLhCc6tXYiUu5WAyegWsUsKWMopvozacrKINTNsuJHeFG"></script>
     <script src="vendor/element-plus.js?v=1"></script>
@@ -20,6 +20,7 @@
 </head>
 <body spellcheck="false">
     <div id="app" v-cloak>
+      <el-config-provider :locale="elLocale">
         <!-- 模态框组件 -->
         <modals 
             :show-add-modal="showAddModal" :is-editing="isEditing" :new-source="newSource" :is-testing="isTesting" :is-loading="isLoading"
@@ -29,6 +30,7 @@
             :migrate-tables-loading="migrateTablesLoading" :migrate-tables-error="migrateTablesError"
             :show-d-d-l-modal="showDDLModal" :ddl-table="ddlTable" :ddl-content="ddlContent"
             :show-config-modal="showConfigModal" :system-config="systemConfig"
+            :locale="locale" :locale-mode="localeMode" :locales="locales"
             :available-databases="availableDatabases" :is-discovering="isDiscovering"
             :show-confirm-modal="showConfirmModal" :confirm-payload="confirmPayload"
             :show-session-modal="showSessionModal" :session-source-id="sessionSourceId" :session-source-name="sessionSourceName"
@@ -40,7 +42,7 @@
             @close-migrate="showMigrateModal = false" @migrate-source-change="handleMigrateSourceChange" @do-migrate="doMigrate"
             @update:migrate-dest-id="migrateDestId = $event ? parseInt($event) : null" @update:selected-migrate-tables="selectedMigrateTables = $event"
             @close-ddl="showDDLModal = false" @copy-ddl="copyToClipboard"
-            @close-config="showConfigModal = false" @save-config="saveSettings"
+            @close-config="showConfigModal = false" @save-config="saveSettings" @change-locale="changeLocale"
             @export-config="exportConfig" @import-config="importConfig"
             @import-dbeaver-config="importDbeaverConfig"
             @import-dbeaver-file="importDbeaverFile"
@@ -57,39 +59,39 @@
         <!-- 自定义右键菜单 -->
         <div v-if="contextMenu.show" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click.stop>
             <template v-if="contextMenu.type === 'source'">
-                <div class="menu-item" @click="editSource(contextMenu.data)">编辑连接</div>
-                <div class="menu-item" @click="duplicateSource(contextMenu.data)">复制连接</div>
-                <div class="menu-item" @click="toggleFavorite(contextMenu.data)">{{ contextMenu.data.is_favorite ? '取消收藏' : '收藏' }}</div>
-                <div class="menu-item" @click="moveSourceToGroup(contextMenu.data)">移动到分组…</div>
+                <div class="menu-item" @click="editSource(contextMenu.data)">{{ $t('menu.editConnection') }}</div>
+                <div class="menu-item" @click="duplicateSource(contextMenu.data)">{{ $t('menu.duplicateConnection') }}</div>
+                <div class="menu-item" @click="toggleFavorite(contextMenu.data)">{{ contextMenu.data.is_favorite ? $t('menu.unfavorite') : $t('menu.favorite') }}</div>
+                <div class="menu-item" @click="moveSourceToGroup(contextMenu.data)">{{ $t('menu.moveToGroup') }}</div>
                 <div class="menu-separator"></div>
-                <div v-if="supportsImport(contextMenu.data)" class="menu-item" @click="openImport(contextMenu.data.id)">导入数据</div>
-                <div v-if="supportsBackup(contextMenu.data)" class="menu-item" @click="openBackup(contextMenu.data.id, contextMenu.data.name)">备份数据库</div>
-                <div v-if="supportsTableSearch(contextMenu.data)" class="menu-item" @click="openTableSearch(contextMenu.data)">全表搜索</div>
-                <div v-if="supportsSessions(contextMenu.data)" class="menu-item" @click="openSessionManager(contextMenu.data.id, contextMenu.data.name)">会话管理</div>
+                <div v-if="supportsImport(contextMenu.data)" class="menu-item" @click="openImport(contextMenu.data.id)">{{ $t('menu.importData') }}</div>
+                <div v-if="supportsBackup(contextMenu.data)" class="menu-item" @click="openBackup(contextMenu.data.id, contextMenu.data.name)">{{ $t('menu.backupDatabase') }}</div>
+                <div v-if="supportsTableSearch(contextMenu.data)" class="menu-item" @click="openTableSearch(contextMenu.data)">{{ $t('menu.searchAllTables') }}</div>
+                <div v-if="supportsSessions(contextMenu.data)" class="menu-item" @click="openSessionManager(contextMenu.data.id, contextMenu.data.name)">{{ $t('menu.sessions') }}</div>
                 <template v-if="currentSource?.id === contextMenu.data.id">
                     <div class="menu-separator"></div>
-                    <div class="menu-item" @click="refreshSource(contextMenu.data)">刷新</div>
-                    <div class="menu-item" @click="closeSource(contextMenu.data)">断开连接</div>
+                    <div class="menu-item" @click="refreshSource(contextMenu.data)">{{ $t('common.refresh') }}</div>
+                    <div class="menu-item" @click="closeSource(contextMenu.data)">{{ $t('menu.disconnect') }}</div>
                 </template>
                 <div class="menu-separator"></div>
-                <div class="menu-item danger" @click="deleteSource(contextMenu.data)">删除连接</div>
+                <div class="menu-item danger" @click="deleteSource(contextMenu.data)">{{ $t('menu.deleteConnection') }}</div>
             </template>
             <template v-if="contextMenu.type === 'group'">
-                <div class="menu-item" @click="renameGroup(contextMenu.data)">重命名分组</div>
-                <div class="menu-item danger" @click="ungroupGroup(contextMenu.data)">解散分组</div>
+                <div class="menu-item" @click="renameGroup(contextMenu.data)">{{ $t('group.renameTitle') }}</div>
+                <div class="menu-item danger" @click="ungroupGroup(contextMenu.data)">{{ $t('menu.ungroup') }}</div>
             </template>
             <template v-if="contextMenu.type === 'table'">
-                <div class="menu-item" @click="viewData(contextMenu.data)">查看数据</div>
+                <div class="menu-item" @click="viewData(contextMenu.data)">{{ $t('menu.viewData') }}</div>
                 <div class="menu-separator"></div>
-                <div class="menu-item" @click="copySelect(contextMenu.data)">复制 SELECT</div>
+                <div class="menu-item" @click="copySelect(contextMenu.data)">{{ $t('menu.copySelect') }}</div>
                 <div class="menu-item" @click="copyInsert(contextMenu.data)">{{ copyInsertLabel(contextMenu.data) }}</div>
             </template>
             <template v-if="contextMenu.type === 'workspace-tab'">
-                <div v-if="contextMenu.data.id !== 'sql-console'" class="menu-item" @click="closeWorkspaceTab(contextMenu.data)">关闭标签</div>
-                <div class="menu-item" @click="closeOtherWorkspaceTabs(contextMenu.data)">关闭其他标签</div>
-                <div v-if="hasWorkspaceTabsToRight(contextMenu.data)" class="menu-item" @click="closeWorkspaceTabsToRight(contextMenu.data)">关闭右侧标签</div>
+                <div v-if="contextMenu.data.id !== 'sql-console'" class="menu-item" @click="closeWorkspaceTab(contextMenu.data)">{{ $t('menu.closeTab') }}</div>
+                <div class="menu-item" @click="closeOtherWorkspaceTabs(contextMenu.data)">{{ $t('menu.closeOtherTabs') }}</div>
+                <div v-if="hasWorkspaceTabsToRight(contextMenu.data)" class="menu-item" @click="closeWorkspaceTabsToRight(contextMenu.data)">{{ $t('menu.closeTabsToRight') }}</div>
                 <div class="menu-separator"></div>
-                <div class="menu-item" @click="closeAllWorkspaceTabs">关闭全部表标签</div>
+                <div class="menu-item" @click="closeAllWorkspaceTabs">{{ $t('menu.closeAllTableTabs') }}</div>
             </template>
         </div>
 
@@ -97,25 +99,25 @@
             <div class="workbench-toolbar">
                 <div class="brand-mark">DB</div>
                 <span class="toolbar-separator"></span>
-                <el-button @click="openAddSource" title="新建连接">
-                    <span class="tool-icon">⛁</span><span>新建连接</span>
+                <el-button @click="openAddSource" :title="$t('toolbar.newConnection')">
+                    <span class="tool-icon">⛁</span><span>{{ $t('toolbar.newConnection') }}</span>
                 </el-button>
-                <el-button @click="showMigrateModal = true" title="数据传输">
-                    <span class="tool-icon">⇄</span><span>迁移</span>
+                <el-button @click="showMigrateModal = true" :title="$t('toolbar.migrateTitle')">
+                    <span class="tool-icon">⇄</span><span>{{ $t('toolbar.migrate') }}</span>
                 </el-button>
-                <el-button @click="openCompareTool" title="比较结构">
-                    <span class="tool-icon">≋</span><span>比较结构</span>
+                <el-button @click="openCompareTool" :title="$t('toolbar.compareTitle')">
+                    <span class="tool-icon">≋</span><span>{{ $t('toolbar.compare') }}</span>
                 </el-button>
-                <el-button @click="openTableSearch()" title="在库中所有表里搜索数据">
-                    <span class="tool-icon">⌕</span><span>全表搜索</span>
+                <el-button @click="openTableSearch()" :title="$t('toolbar.searchTitle')">
+                    <span class="tool-icon">⌕</span><span>{{ $t('menu.searchAllTables') }}</span>
                 </el-button>
-                <el-button @click="openSettings" title="系统设置">
-                    <span class="tool-icon">⚙</span><span>设置</span>
+                <el-button @click="openSettings" :title="$t('toolbar.settings')">
+                    <span class="tool-icon">⚙</span><span>{{ $t('toolbar.settings') }}</span>
                 </el-button>
                 <div class="toolbar-context">
                     <span class="status-dot" :class="{ online: currentSource }"></span>
                     <span v-if="currentSource">{{ currentSource.name }} / {{ currentSource.database }}</span>
-                    <span v-else>未连接</span>
+                    <span v-else>{{ $t('common.notConnected') }}</span>
                 </div>
             </div>
         </div>
@@ -125,11 +127,11 @@
             <div class="sidebar" :style="{ width: sidebarWidth + 'px' }">
                 <!-- Tabs Headers -->
                 <div class="sidebar-tabs">
-                    <button :class="['sidebar-tab', { active: activeTab === 'database' }]" @click="activeTab = 'database'" title="数据库导航">
-                        🗄️ 数据库
+                    <button :class="['sidebar-tab', { active: activeTab === 'database' }]" @click="activeTab = 'database'" :title="$t('sidebar.connectionsTitle')">
+                        🗄️ {{ $t('sidebar.connections') }}
                     </button>
-                    <button :class="['sidebar-tab', { active: activeTab === 'history' }]" @click="activeTab = 'history'" title="查询历史">
-                        📋 历史
+                    <button :class="['sidebar-tab', { active: activeTab === 'history' }]" @click="activeTab = 'history'" :title="$t('sidebar.historyTitle')">
+                        📋 {{ $t('sidebar.history') }}
                     </button>
                 </div>
 
@@ -169,8 +171,8 @@
                              @click="activeWorkspaceTabId = tab.id"
                              @contextmenu.prevent="handleWorkspaceTabContextMenu($event, tab)">
                             <span class="tab-dot" :class="{ table: tab.type === 'table' }"></span>
-                            <span>{{ tab.title }}</span>
-                            <small>{{ tab.subtitle || (currentProvider ? currentProvider.displayName : '未连接') }}</small>
+                            <span>{{ $t(tab.title) }}</span>
+                            <small>{{ tab.subtitle || (currentProvider ? currentProvider.displayName : $t('common.notConnected')) }}</small>
                             <button v-if="tab.id !== 'sql-console'" class="tab-close-btn" @click.stop="closeWorkspaceTab(tab)">×</button>
                         </div>
                     </div>
@@ -219,11 +221,11 @@
             ></ai-panel>
         </div>
         <div class="statusbar">
-            <span>{{ queryResult.isRunning ? '执行中' : '就绪' }}</span>
-            <span v-if="queryResult.executedSql">行数: {{ queryResult.rowCount }} · 耗时: {{ queryResult.time }}s</span>
-            <span v-if="currentSource">{{ currentSource.db_type }} · {{ currentSource.database }}</span>
-            <span v-else>选择左侧连接开始工作</span>
-            <span>自动预览最多 100 行</span>
+            <span>{{ queryResult.isRunning ? $t('status.running') : $t('status.ready') }}</span>
+            <span v-if="queryResult.executedSql">{{ $t('status.rowsAndTime', { rows: queryResult.rowCount, time: queryResult.time }) }}</span>
+            <span v-if="currentSource">{{ currentProvider ? currentProvider.displayName : currentSource.db_type }} · {{ currentSource.database }}</span>
+            <span v-else>{{ $t('status.pickConnection') }}</span>
+            <span>{{ $t('status.pageSize') }}</span>
         </div>
         <div v-if="isLoading" class="loading-overlay"><div class="spinner"></div></div>
 
@@ -232,8 +234,9 @@
             @close="showImportModal = false" @imported="refreshTree"
             :notify="notify" :show-message="showMessage" :is-loading="isLoading"
         ></import-panel>
+      </el-config-provider>
     </div>
 
-    <script type="module" src="js/app.js?v=ui-fixes-20261016b"></script>
+    <script type="module" src="js/app.js?v=i18n-20261109"></script>
 </body>
 </html>

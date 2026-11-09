@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 const { ref, reactive } = Vue;
 
 export function useSettings({ dbService, notify, showMessage, isLoading, refreshTree }) {
@@ -17,7 +18,7 @@ export function useSettings({ dbService, notify, showMessage, isLoading, refresh
             }
             showConfigModal.value = true;
         } catch (e) {
-            showMessage('获取配置失败: ' + e.message, '错误', 'error');
+            showMessage(t('settings.loadFailed', { error: e.message }), t('common.error'), 'error');
         }
     };
 
@@ -26,13 +27,13 @@ export function useSettings({ dbService, notify, showMessage, isLoading, refresh
         try {
             const res = await dbService.saveConfig(systemConfig);
             if (res.success) {
-                notify('设置已保存', 'success');
+                notify(t('settings.saved'), 'success');
                 showConfigModal.value = false;
             } else {
-                showMessage('保存失败: ' + res.error, '错误', 'error');
+                showMessage(t('common.saveFailed', { error: res.error }), t('common.error'), 'error');
             }
         } catch (e) {
-            showMessage('保存失败: ' + e.message, '错误', 'error');
+            showMessage(t('common.saveFailed', { error: e.message }), t('common.error'), 'error');
         } finally {
             isLoading.value = false;
         }
@@ -43,7 +44,7 @@ export function useSettings({ dbService, notify, showMessage, isLoading, refresh
         try {
             const res = await dbService.exportConfig();
             if (!res.success) {
-                showMessage('获取配置失败: ' + (res.error || '未知错误'), '错误', 'error');
+                showMessage(t('settings.loadFailed', { error: res.error || t('common.unknownError') }), t('common.error'), 'error');
                 return;
             }
             const configData = JSON.stringify(res.data || { data_sources: [], system_config: {} }, null, 2);
@@ -51,8 +52,8 @@ export function useSettings({ dbService, notify, showMessage, isLoading, refresh
 
             if (window.pywebview?.api?.save_json) {
                 const saveRes = await window.pywebview.api.save_json(filename, configData);
-                if (saveRes?.success) { notify('配置与连接已导出', 'success'); return; }
-                if (!saveRes?.cancelled) { showMessage('导出失败: ' + (saveRes?.error || '未知错误'), '错误', 'error'); return; }
+                if (saveRes?.success) { notify(t('settings.exported'), 'success'); return; }
+                if (!saveRes?.cancelled) { showMessage(t('settings.exportFailed', { error: saveRes?.error || t('common.unknownError') }), t('common.error'), 'error'); return; }
                 return;
             }
 
@@ -65,7 +66,7 @@ export function useSettings({ dbService, notify, showMessage, isLoading, refresh
                     const writable = await handle.createWritable();
                     await writable.write(configData);
                     await writable.close();
-                    notify('配置与连接已导出', 'success');
+                    notify(t('settings.exported'), 'success');
                     return;
                 } catch (e) {
                     if (e.name === 'AbortError') return;
@@ -79,9 +80,9 @@ export function useSettings({ dbService, notify, showMessage, isLoading, refresh
             document.body.appendChild(a); a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            notify('配置与连接已导出', 'success');
+            notify(t('settings.exported'), 'success');
         } catch (e) {
-            showMessage('导出失败: ' + e.message, '错误', 'error');
+            showMessage(t('settings.exportFailed', { error: e.message }), t('common.error'), 'error');
         } finally {
             isLoading.value = false;
         }
@@ -89,21 +90,21 @@ export function useSettings({ dbService, notify, showMessage, isLoading, refresh
 
     const importConfig = async (parsedData) => {
         if (!parsedData || typeof parsedData !== 'object') {
-            showMessage('无效的配置文件格式', '错误', 'error');
+            showMessage(t('settings.invalidConfigFile'), t('common.error'), 'error');
             return;
         }
         isLoading.value = true;
         try {
             const res = await dbService.importConfig(parsedData);
             if (res.success) {
-                notify('配置已导入并应用', 'success');
+                notify(t('settings.imported'), 'success');
                 showConfigModal.value = false;
                 refreshTree();
             } else {
-                showMessage('导入失败: ' + (res.error || '未知错误'), '错误', 'error');
+                showMessage(t('settings.importFailed', { error: res.error || t('common.unknownError') }), t('common.error'), 'error');
             }
         } catch (e) {
-            showMessage('导入失败: ' + e.message, '错误', 'error');
+            showMessage(t('settings.importFailed', { error: e.message }), t('common.error'), 'error');
         } finally {
             isLoading.value = false;
         }
@@ -113,12 +114,14 @@ export function useSettings({ dbService, notify, showMessage, isLoading, refresh
         if (res.success) {
             const parsed = res.parsed_count ?? 0;
             const imported = res.imported_count ?? 0;
-            const skipped = res.skipped_count ? `，跳过 ${res.skipped_count} 个不支持的连接` : '';
-            notify(`DBeaver 数据源已导入：新增 ${imported} 个，共解析 ${parsed} 个${skipped}`, 'success');
+            const message = res.skipped_count
+                ? t('settings.dbeaverImportedSkipped', { imported, parsed, skipped: res.skipped_count })
+                : t('settings.dbeaverImported', { imported, parsed });
+            notify(message, 'success');
             showConfigModal.value = false;
             refreshTree();
         } else if (!res.cancelled) {
-            showMessage('导入 DBeaver 数据源失败: ' + (res.error || '未知错误'), '错误', 'error');
+            showMessage(t('settings.dbeaverFailed', { error: res.error || t('common.unknownError') }), t('common.error'), 'error');
         }
     };
 
@@ -129,7 +132,7 @@ export function useSettings({ dbService, notify, showMessage, isLoading, refresh
             const res = await dbService.importDbeaverConfig(file);
             handleDbeaverImportResult(res);
         } catch (e) {
-            showMessage('导入 DBeaver 数据源失败: ' + e.message, '错误', 'error');
+            showMessage(t('settings.dbeaverFailed', { error: e.message }), t('common.error'), 'error');
         } finally {
             isLoading.value = false;
         }
@@ -142,7 +145,7 @@ export function useSettings({ dbService, notify, showMessage, isLoading, refresh
             const res = await window.pywebview.api.import_dbeaver_file();
             handleDbeaverImportResult(res || {});
         } catch (e) {
-            showMessage('导入 DBeaver 文件失败: ' + e.message, '错误', 'error');
+            showMessage(t('settings.dbeaverFailed', { error: e.message }), t('common.error'), 'error');
         } finally {
             isLoading.value = false;
         }

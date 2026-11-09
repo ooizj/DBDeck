@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 from src.common.config import config
+from src.common.i18n import UI_LANGUAGE_CONFIG_KEY, detect_system_language, msg, normalize_language
 from src.common.storage import storage
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,31 @@ def update_config(settings: Dict[str, Any]) -> dict[str, bool]:
         storage.set_config(key, str(value))
     config.reload()
     return {"success": True}
+
+
+def get_ui_preferences() -> Dict[str, Any]:
+    """界面偏好（目前只有语言）。
+
+    language 是用户手动选择并保存的语言，没选过时为 None；system_language 是操作系统界面语言的
+    原始标签，前端在没有保存过选择时用它决定默认语言（中文系统 → 中文，其他 → English）。
+    """
+    language = normalize_language(storage.get_config(UI_LANGUAGE_CONFIG_KEY))
+    return {"success": True, "language": language, "system_language": detect_system_language()}
+
+
+def update_ui_preferences(language: Optional[str]) -> Dict[str, Any]:
+    """保存界面语言；language 为 "system" 或空时清除保存的选择，恢复跟随系统语言。"""
+    if language in (None, "", "system"):
+        storage.delete_config(UI_LANGUAGE_CONFIG_KEY)
+        return {"success": True, "language": None}
+    normalized = normalize_language(language)
+    if not normalized:
+        return {
+            "success": False,
+            "error": msg(f"不支持的界面语言: {language}", f"Unsupported interface language: {language}"),
+        }
+    storage.set_config(UI_LANGUAGE_CONFIG_KEY, normalized)
+    return {"success": True, "language": normalized}
 
 
 def export_config() -> dict[str, Any]:
@@ -174,7 +200,7 @@ def _dbeaver_connection_to_source(conn_id: str, conn: dict[str, Any]) -> dict[st
 def parse_dbeaver_data_sources(data: dict[str, Any]) -> dict[str, Any]:
     connections = data.get("connections")
     if not isinstance(connections, dict):
-        raise ValueError("无效的 DBeaver data-sources.json：缺少 connections")
+        raise ValueError(msg("无效的 DBeaver data-sources.json：缺少 connections", "Invalid DBeaver data-sources.json: connections is missing"))
 
     imported_sources = []
     skipped_count = 0
@@ -204,12 +230,12 @@ def parse_dbeaver_file(filename: str, content: bytes) -> dict[str, Any]:
                 or name.endswith(".dbeaver/data-sources.json")
             ]
             if not candidates:
-                raise ValueError("未在 DBeaver 归档中找到 .dbeaver/data-sources.json")
+                raise ValueError(msg("未在 DBeaver 归档中找到 .dbeaver/data-sources.json", ".dbeaver/data-sources.json was not found in the DBeaver archive"))
             with zf.open(candidates[0]) as fp:
                 return parse_dbeaver_data_sources(json.loads(fp.read().decode("utf-8")))
 
     if suffix in {".dbp", ".zip"}:
-        raise ValueError("文件不是有效的 DBeaver .dbp/.zip 归档")
+        raise ValueError(msg("文件不是有效的 DBeaver .dbp/.zip 归档", "The file is not a valid DBeaver .dbp/.zip archive"))
 
     return parse_dbeaver_data_sources(json.loads(content.decode("utf-8")))
 
@@ -234,13 +260,13 @@ def _find_dbeaver_data_sources_file(path: Path) -> Path:
     if matches:
         return matches[0]
 
-    raise ValueError("未在目录中找到 .dbeaver/data-sources.json")
+    raise ValueError(msg("未在目录中找到 .dbeaver/data-sources.json", ".dbeaver/data-sources.json was not found in the folder"))
 
 
 def parse_dbeaver_path(path: str) -> dict[str, Any]:
     source_path = Path(path).expanduser()
     if not source_path.exists():
-        raise ValueError(f"路径不存在: {path}")
+        raise ValueError(msg(f"路径不存在: {path}", f"Path does not exist: {path}"))
     if source_path.is_file() and source_path.suffix.lower() in {".dbp", ".zip"}:
         return parse_dbeaver_file(source_path.name, source_path.read_bytes())
 

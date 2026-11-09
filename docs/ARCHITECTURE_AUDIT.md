@@ -1,5 +1,7 @@
 # Architecture Audit
 
+[简体中文](ARCHITECTURE_AUDIT.zh-CN.md) | **English**
+
 DBDeck is a local desktop-first database client with LLM-assisted operations. The current architecture is viable, but product quality depends on keeping HTTP routing, runtime services, provider implementations, and UI state clearly separated.
 
 ## Must-Fix Items

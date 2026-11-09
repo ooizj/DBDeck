@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 const RedisKeyNode = {
     name: 'RedisKeyNode',
     props: ['node', 'source', 'expandedFolders', 'selectedKeyName'],
@@ -118,15 +119,15 @@ export default {
         sourceTooltip(source) {
             const lines = [source.name, `${this.typeMeta(source).label} · ${this.sourceMeta(source)}`];
             if (source.use_ssh_tunnel) lines.push(`SSH: ${source.ssh_host || ''}`);
-            if (source.group_name) lines.push(`分组: ${source.group_name}`);
+            if (source.group_name) lines.push(t('tree.groupTooltip', { name: source.group_name }));
             return lines.join('\n');
         },
 
         // ===== 统一导航树搜索 =====
         searchPlaceholder(source) {
-            if (source.db_type === 'redis') return 'Enter 搜索 key';
-            if (source.db_type === 'mongodb') return '过滤集合';
-            return '过滤对象';
+            if (source.db_type === 'redis') return t('tree.filterRedis');
+            if (source.db_type === 'mongodb') return t('tree.filterCollections');
+            return t('tree.filterObjects');
         },
         onFilterInput(source, val) {
             if (source.db_type === 'redis') {
@@ -158,16 +159,17 @@ export default {
             if (source.db_type === 'mongodb') {
                 return [{
                     key: 'collections',
-                    title: '集合',
+                    title: t('tree.collections'),
+                    empty: t('tree.emptyCollections'),
                     icon: '▦',
                     items: items.filter(item => this.normalizeObjectType(item) === 'collection'),
                 }];
             }
             const definitions = [
-                { key: 'tables', title: '表', icon: '▦', types: ['table'] },
-                { key: 'views', title: '视图', icon: '◫', types: ['view'] },
-                { key: 'procedures', title: '存储过程', icon: 'ƒ', types: ['procedure'] },
-                { key: 'functions', title: '函数', icon: 'λ', types: ['function'] },
+                { key: 'tables', title: t('tree.tables'), empty: t('tree.emptyTables'), icon: '▦', types: ['table'] },
+                { key: 'views', title: t('tree.views'), empty: t('tree.emptyViews'), icon: '◫', types: ['view'] },
+                { key: 'procedures', title: t('tree.procedures'), empty: t('tree.emptyProcedures'), icon: 'ƒ', types: ['procedure'] },
+                { key: 'functions', title: t('tree.functions'), empty: t('tree.emptyFunctions'), icon: 'λ', types: ['function'] },
             ];
             return definitions.map(group => ({
                 ...group,
@@ -205,7 +207,7 @@ export default {
             const type = this.normalizeObjectType(table);
             if (type === 'procedure' || type === 'function') return '';
             const n = table.columns?.length || 0;
-            return type === 'collection' ? `${n} 个字段` : `${n} 列`;
+            return type === 'collection' ? t('tree.fieldCount', { count: n }) : t('tree.columnCount', { count: n });
         },
         objectTooltip(table) {
             const meta = this.objectMeta(table);
@@ -215,10 +217,10 @@ export default {
             return ['table', 'view', 'collection', 'key'].includes(this.normalizeObjectType(table));
         },
         sourceMeta(source) {
-            if (source.db_type === 'sqlite') return source.database || 'SQLite 文件';
+            if (source.db_type === 'sqlite') return source.database || t('tree.sqliteFile');
             if (source.db_type === 'redis') return `${source.host || 'localhost'}/db${source.database || '0'}`;
             const host = source.host || 'localhost';
-            const database = source.database || '未选择数据库';
+            const database = source.database || t('tree.noDatabase');
             return `${host}/${database}`;
         },
         toggleRedisFolder(path) {
@@ -307,7 +309,7 @@ export default {
             });
             const sections = [];
             if (favorites.length) {
-                sections.push({ key: 'favorites', title: '收藏', icon: '★', sources: favorites.sort(byName) });
+                sections.push({ key: 'favorites', title: t('tree.favorites'), icon: '★', sources: favorites.sort(byName) });
             }
             [...groups.entries()]
                 .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
@@ -317,7 +319,7 @@ export default {
             if (ungrouped.length) {
                 sections.push({
                     key: 'ungrouped',
-                    title: sections.length ? '未分组' : '',
+                    title: sections.length ? t('tree.ungrouped') : '',
                     icon: '▤',
                     sources: ungrouped.sort(byName),
                 });
@@ -333,25 +335,25 @@ export default {
         <div class="sidebar-content" style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
             <div class="sidebar-header">
                 <div>
-                    <div class="sidebar-title">数据库导航</div>
-                    <div class="sidebar-subtitle">{{ dbSources.length }} 个连接</div>
+                    <div class="sidebar-title">{{ $t('sidebar.connectionsTitle') }}</div>
+                    <div class="sidebar-subtitle">{{ $t('tree.connectionCount', { count: dbSources.length }) }}</div>
                 </div>
                 <div class="sidebar-actions">
-                    <button class="nav-icon-btn" title="折叠当前连接" :disabled="!expandedIds.length" @click="$emit('collapse-all')">⊟</button>
-                    <button class="nav-icon-btn" title="新建连接" @click="$emit('open-add')">＋</button>
+                    <button class="nav-icon-btn" :title="$t('tree.collapseAll')" :disabled="!expandedIds.length" @click="$emit('collapse-all')">⊟</button>
+                    <button class="nav-icon-btn" :title="$t('toolbar.newConnection')" @click="$emit('open-add')">＋</button>
                 </div>
             </div>
             <div v-if="dbSources.length" class="nav-connection-search">
-                <el-input v-model="connectionFilter" size="small" clearable placeholder="搜索连接（名称 / 主机 / 库 / 分组）">
+                <el-input v-model="connectionFilter" size="small" clearable :placeholder="$t('tree.searchConnections')">
                     <template #prefix><span class="tree-search-icon">⌕</span></template>
                 </el-input>
             </div>
             <div class="tree-container" style="flex: 1; overflow-y: auto;">
                 <div v-if="!dbSources.length" class="empty-navigator">
-                    <div class="empty-title">暂无连接</div>
-                    <button class="toolbar-btn" @click="$emit('open-add')">新建连接</button>
+                    <div class="empty-title">{{ $t('tree.noConnections') }}</div>
+                    <button class="toolbar-btn" @click="$emit('open-add')">{{ $t('toolbar.newConnection') }}</button>
                 </div>
-                <div v-else-if="!filteredSources.length" class="tree-empty-hint">没有匹配的连接</div>
+                <div v-else-if="!filteredSources.length" class="tree-empty-hint">{{ $t('tree.noMatchingConnections') }}</div>
                 <template v-for="section in sections" :key="section.key">
                     <div v-if="section.title"
                          :class="['nav-group-header', { favorites: section.key === 'favorites' }]"
@@ -369,7 +371,7 @@ export default {
                             <div :class="['tree-item', 'tree-source', { active: currentSource?.id === source.id }]"
                                  :title="sourceTooltip(source)"
                                  @click="$emit('activate-source', source)">
-                                <button class="chevron-button" @click.stop="$emit('toggle-expand', source)" :title="isExpanded(source) ? '折叠' : '展开'">
+                                <button class="chevron-button" @click.stop="$emit('toggle-expand', source)" :title="isExpanded(source) ? $t('tree.collapse') : $t('tree.expand')">
                                     <span v-if="source.loading" class="spinner-small"></span>
                                     <span v-else :class="['chevron', { expanded: isExpanded(source) }]">▶</span>
                                 </button>
@@ -378,8 +380,8 @@ export default {
                                     <strong>{{ source.name }}</strong>
                                     <small>{{ sourceMeta(source) }}</small>
                                 </span>
-                                <span v-if="source.error" class="source-state error" title="连接出错"></span>
-                                <span v-else-if="currentSource?.id === source.id" class="source-state online" title="已连接"></span>
+                                <span v-if="source.error" class="source-state error" :title="$t('tree.connectionError')"></span>
+                                <span v-else-if="currentSource?.id === source.id" class="source-state online" :title="$t('tree.connected')"></span>
                             </div>
                             <div v-if="isExpanded(source)" class="tree-children">
                                 <!-- 统一搜索框：所有数据源结构一致（第一行搜索框 + 下面对象列表） -->
@@ -432,22 +434,22 @@ export default {
                                                 </span>
                                             </div>
                                             <div v-if="!source.loading && !source.error && group.items.length === 0" class="tree-empty-hint object-group-empty">
-                                                暂无{{ group.title }}
+                                                {{ group.empty }}
                                             </div>
                                         </div>
                                     </div>
                                     <div v-if="!source.loading && !source.error && (source.children && source.children.length) && visibleChildren(source).length === 0" class="tree-empty-hint">
-                                        无匹配对象
+                                        {{ $t('tree.noMatchingObjects') }}
                                     </div>
                                 </template>
 
                                 <div v-if="source.db_type === 'redis' && !source.loading && !source.error && (!source.children || source.children.length === 0)" class="redis-empty-keys">
-                                    <span>没有匹配的 key</span>
-                                    <button class="toolbar-btn" @click="$emit('reset-redis-key-search')">显示全部</button>
+                                    <span>{{ $t('tree.noMatchingKeys') }}</span>
+                                    <button class="toolbar-btn" @click="$emit('reset-redis-key-search')">{{ $t('tree.showAll') }}</button>
                                 </div>
                                 <div v-if="source.loading" class="redis-empty-keys">
                                     <span class="spinner-small"></span>
-                                    <span>{{ source.db_type === 'redis' ? '加载 key...' : '加载中...' }}</span>
+                                    <span>{{ source.db_type === 'redis' ? $t('tree.loadingKeys') : $t('common.loading') }}</span>
                                 </div>
                                 <div v-if="source.error" class="tree-error-hint">
                                     ⚠️ {{ source.error }}

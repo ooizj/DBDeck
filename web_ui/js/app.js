@@ -17,6 +17,8 @@ import { useMigration } from './state/useMigration.js';
 import { useSqlEditor } from './state/useSqlEditor.js';
 import { defaultSourceConfig, sourcePayload } from './utils/sourceHelpers.js';
 import { shouldLockSqlEditor } from './utils/editorState.js';
+import { t, LOCALES, currentLocale, setLocale, applySystemLocale, clearStoredLocale, hasStoredLocale } from './i18n/index.js';
+import { elementPlusLocale } from './i18n/elementPlus.js';
 
 const { createApp, ref, reactive, onMounted, onBeforeUnmount, nextTick, watch, computed, provide } = Vue;
 
@@ -46,12 +48,51 @@ const app = createApp({
         );
         const currentTables = ref([]);
         const expandedIds = ref([]);
-        const workspaceTabs = ref([{ id: 'sql-console', type: 'sql', title: 'SQL 控制台' }]);
+        const workspaceTabs = ref([{ id: 'sql-console', type: 'sql', title: 'workspace.sqlConsole' }]);
         const activeWorkspaceTabId = ref('sql-console');
         const activeWorkspaceTab = computed(() => workspaceTabs.value.find(tab => tab.id === activeWorkspaceTabId.value) || workspaceTabs.value[0]);
 
         // 左侧栏 tab 状态（database / history）
         const activeTab = ref('database');
+
+        // ========== 界面语言 ==========
+        // 优先级：用户在「设置」里选过的语言（后端为准，桌面版 WebView 可能不会跨启动保留 localStorage）
+        // → 操作系统语言（后端检测）→ 浏览器语言（页面加载时已按它显示）。
+        const locale = currentLocale;
+        const elLocale = computed(() => elementPlusLocale(currentLocale.value));
+        // 设置里的语言选项：'system'（跟随系统）/ 'zh' / 'en'
+        const localeMode = ref(hasStoredLocale() ? currentLocale.value : 'system');
+        const systemLanguage = ref(null);
+        const changeLocale = async (value) => {
+            if (value === 'system') {
+                clearStoredLocale();
+                applySystemLocale(systemLanguage.value);
+                localeMode.value = 'system';
+            } else {
+                localeMode.value = setLocale(value);
+            }
+            try {
+                await dbService.saveUiPreferences({ language: localeMode.value });
+            } catch (e) {
+                console.warn('Failed to save UI language', e);
+            }
+        };
+        const loadSavedLocale = async () => {
+            try {
+                const res = await dbService.getUiPreferences();
+                if (!res?.success) return;
+                systemLanguage.value = res.system_language || null;
+                if (res.language) {
+                    localeMode.value = setLocale(res.language);
+                } else {
+                    clearStoredLocale();
+                    localeMode.value = 'system';
+                    applySystemLocale(res.system_language);
+                }
+            } catch (e) {
+                console.warn('Failed to load UI language', e);
+            }
+        };
 
         // ========== 会话管理功能 ==========
         const showSessionModal = ref(false);
@@ -107,13 +148,13 @@ const app = createApp({
 
         const openExplainPlan = () => {
             if (!currentSource.value || !getEditor()) {
-                notify('请先选择数据源并输入SQL', 'warning');
+                notify(t('explain.needSourceAndSql'), 'warning');
                 return;
             }
             
             const query = sqlEditor.getSelectedOrCurrentSql().trim();
             if (!query) {
-                notify('请输入要分析的SQL', 'warning');
+                notify(t('explain.needSql'), 'warning');
                 return;
             }
             
@@ -131,11 +172,11 @@ const app = createApp({
         const openCompareTool = () => {
             const source = currentSource.value;
             if (!source) {
-                notify('请先在左侧选择一个连接，再比较其中两张表的结构', 'warning');
+                notify(t('compare.needSource'), 'warning');
                 return;
             }
             if (!['mysql', 'postgresql', 'sqlite'].includes(source.db_type)) {
-                notify(`${getProvider(source.db_type).displayName} 不支持结构比较`, 'warning');
+                notify(t('compare.unsupported', { db: getProvider(source.db_type).displayName }), 'warning');
                 return;
             }
             compareSourceId.value = source.id;
@@ -155,11 +196,11 @@ const app = createApp({
             contextMenu.show = false;
             const target = source || currentSource.value;
             if (!target) {
-                notify('请先在左侧选择一个连接，再搜索其中的数据', 'warning');
+                notify(t('tableSearch.needSource'), 'warning');
                 return;
             }
             if (!supportsTableSearch(target)) {
-                notify(`${getProvider(target.db_type).displayName} 不支持全表搜索`, 'warning');
+                notify(t('tableSearch.unsupported', { db: getProvider(target.db_type).displayName }), 'warning');
                 return;
             }
             tableSearchSource.value = target;
@@ -387,11 +428,15 @@ const app = createApp({
                     await Promise.all(refreshPromises);
                 }
             } catch (e) {
-                notify('刷新连接树失败: ' + e.message, 'error');
+                notify(t('tree.refreshFailed', { error: e.message }), 'error');
             } finally { isLoading.value = false; }
         };
 
         const loadMetadata = async (source, options = {}) => {
+            // 同一连接可能有多个元数据请求先后在途（断开后重开、刷新），只采用最后一次的结果
+            const requestId = (source.metadataRequestId || 0) + 1;
+            source.metadataRequestId = requestId;
+            const isStaleRequest = () => source.metadataRequestId !== requestId;
             source.loading = true;
             source.error = null;
             const metadataOptions = {};
@@ -402,6 +447,7 @@ const app = createApp({
             }
             try {
                 const res = await dbService.getMetadata(source.id, metadataOptions);
+                if (isStaleRequest()) return;
                 if (currentSource.value?.id !== source.id && !expandedIds.value.includes(source.id)) {
                     return;
                 }
@@ -432,15 +478,17 @@ const app = createApp({
                     source.error = res.error;
                 }
             } catch (e) {
-                source.error = e.message;
+                if (!isStaleRequest()) source.error = e.message;
             } finally {
-                source.loading = false;
+                if (!isStaleRequest()) source.loading = false;
             }
         };
 
         const disconnectSourceRuntime = async (source, { clearScript = false } = {}) => {
             if (!source) return;
             closeObjectTabs(source.id);
+            // 作废在途的元数据请求，迟到的结果不再回填已断开的连接
+            source.metadataRequestId = (source.metadataRequestId || 0) + 1;
             source.children = [];
             source.error = null;
             source.loading = false;
@@ -453,26 +501,39 @@ const app = createApp({
             } catch (e) {
                 console.error('Failed to disconnect source', e);
             }
-            if (clearScript) sqlEditor.setValue('');
+            if (clearScript) sqlEditor.clearScript();
+        };
+
+        // 切换连接以最后一次点击为准：每次切换/断开递增序号，旧的切换流程在 await 返回后发现序号已变就放弃，
+        // 不再用“切换中直接忽略点击”的锁（某个连接建连卡住时会导致所有点击都没反应）
+        let sourceSwitchSeq = 0;
+        const cancelSourceSwitch = () => {
+            sourceSwitchSeq += 1;
+            isSourceSwitching.value = false;
         };
 
         const selectSource = async (source) => {
-            if (isSourceSwitching.value) return;
+            const seq = ++sourceSwitchSeq;
+            const isStale = () => seq !== sourceSwitchSeq;
             isSourceSwitching.value = true;
             try {
                 activeWorkspaceTabId.value = 'sql-console';
                 if (currentSource.value?.id === source.id) {
                     expandedIds.value = [source.id];
-                    if (!source.children || source.children.length === 0) {
+                    // 正在加载中（如重复点击）不再重复发起元数据请求
+                    if (!source.loading && (!source.children || source.children.length === 0)) {
                         await loadMetadata(source);
                     }
+                    if (isStale()) return;
                     if (getEditor() && !sqlEditor.getValue()) await sqlEditor.loadSourceScript(source);
                     return;
                 }
 
                 await sqlEditor.saveCurrentSourceScript();
+                if (isStale()) return;
                 if (currentSource.value) {
                     await disconnectSourceRuntime(currentSource.value);
+                    if (isStale()) return;
                 }
 
                 expandedIds.value = [source.id];
@@ -483,9 +544,10 @@ const app = createApp({
                 if (!source.children || source.children.length === 0) {
                     await loadMetadata(source);
                 }
+                if (isStale()) return;
                 await sqlEditor.loadSourceScript(source);
             } finally {
-                isSourceSwitching.value = false;
+                if (!isStale()) isSourceSwitching.value = false;
             }
         };
 
@@ -535,52 +597,54 @@ const app = createApp({
             contextMenu.show = false;
             try {
                 const res = await dbService.toggleFavorite(source.id);
-                if (!res.success) throw new Error(res.error || '未知错误');
+                if (!res.success) throw new Error(res.error || t('common.unknownError'));
                 source.is_favorite = res.is_favorite;
             } catch (e) {
-                showMessage('操作失败: ' + e.message, '错误', 'error');
+                showMessage(t('common.operationFailed', { error: e.message }), t('common.error'), 'error');
             }
         };
 
         const moveSourceToGroup = async (source) => {
             contextMenu.show = false;
-            const hint = groupNames.value.length ? `已有分组：${groupNames.value.join('、')}` : '输入新分组名称';
-            const name = await showPrompt(`${hint}。留空则移出分组。`, `移动「${source.name}」到分组`, {
+            const hint = groupNames.value.length
+                ? t('group.movePromptExisting', { groups: groupNames.value.join(t('common.listSeparator')) })
+                : t('group.movePromptNew');
+            const name = await showPrompt(hint, t('group.moveTitle', { name: source.name }), {
                 inputValue: source.group_name || '',
-                placeholder: '例如：生产 / 测试 / 项目名',
+                placeholder: t('group.namePlaceholder'),
             });
             if (name === null) return;
             try {
                 const res = await dbService.setSourceGroup(source.id, name.trim());
-                if (!res.success) throw new Error(res.error || '未知错误');
+                if (!res.success) throw new Error(res.error || t('common.unknownError'));
                 await refreshTree({ reloadMetadata: false });
             } catch (e) {
-                showMessage('移动分组失败: ' + e.message, '错误', 'error');
+                showMessage(t('group.moveFailed', { error: e.message }), t('common.error'), 'error');
             }
         };
 
         const renameGroup = async (group) => {
             contextMenu.show = false;
-            const name = await showPrompt('新的分组名称（与已有分组同名时会合并）', '重命名分组', { inputValue: group.name });
+            const name = await showPrompt(t('group.renamePrompt'), t('group.renameTitle'), { inputValue: group.name });
             if (name === null || !name.trim() || name.trim() === group.name) return;
             try {
                 const res = await dbService.renameGroup(group.id, name.trim());
-                if (!res.success) throw new Error(res.error || '未知错误');
+                if (!res.success) throw new Error(res.error || t('common.unknownError'));
                 await refreshTree({ reloadMetadata: false });
             } catch (e) {
-                showMessage('重命名分组失败: ' + e.message, '错误', 'error');
+                showMessage(t('group.renameFailed', { error: e.message }), t('common.error'), 'error');
             }
         };
 
         const ungroupGroup = async (group) => {
             contextMenu.show = false;
-            if (!await showConfirm(`解散分组「${group.name}」？其中的连接会移到未分组，不会删除连接。`)) return;
+            if (!await showConfirm(t('group.ungroupConfirm', { name: group.name }))) return;
             try {
                 const res = await dbService.ungroup(group.id);
-                if (!res.success) throw new Error(res.error || '未知错误');
+                if (!res.success) throw new Error(res.error || t('common.unknownError'));
                 await refreshTree({ reloadMetadata: false });
             } catch (e) {
-                showMessage('解散分组失败: ' + e.message, '错误', 'error');
+                showMessage(t('group.ungroupFailed', { error: e.message }), t('common.error'), 'error');
             }
         };
 
@@ -589,6 +653,7 @@ const app = createApp({
             if (index > -1) expandedIds.value.splice(index, 1);
             const wasCurrentSource = currentSource.value?.id === source.id;
             if (wasCurrentSource) {
+                cancelSourceSwitch();
                 aiChat.cancelGeneration();
                 await sqlEditor.saveCurrentSourceScript();
                 currentSource.value = null;
@@ -603,9 +668,9 @@ const app = createApp({
             isTesting.value = true;
             try {
                 const res = await dbService.testConnection(newSource);
-                if (res.success) notify('连接成功！', 'success');
-                else showMessage('连接失败: ' + res.error, '错误', 'error');
-            } catch (e) { showMessage('测试请求异常: ' + e.message, '错误', 'error'); }
+                if (res.success) notify(t('source.testSuccess'), 'success');
+                else showMessage(t('source.testFailed', { error: res.error }), t('common.error'), 'error');
+            } catch (e) { showMessage(t('source.testFailed', { error: e.message }), t('common.error'), 'error'); }
             finally { isTesting.value = false; }
         };
 
@@ -615,12 +680,12 @@ const app = createApp({
                 const res = await dbService.listDatabases(newSource);
                 if (res.success) {
                     availableDatabases.value = res.databases;
-                    notify(`成功获取到 ${res.databases.length} 个数据库`, 'success');
+                    notify(t('source.databasesFound', { count: res.databases.length }), 'success');
                 } else {
-                    showMessage('获取数据库列表失败: ' + res.error, '错误', 'error');
+                    showMessage(t('source.listDatabasesFailed', { error: res.error }), t('common.error'), 'error');
                 }
             } catch (e) {
-                showMessage('请求异常: ' + e.message, '错误', 'error');
+                showMessage(t('source.listDatabasesFailed', { error: e.message }), t('common.error'), 'error');
             } finally {
                 isDiscovering.value = false;
             }
@@ -628,11 +693,11 @@ const app = createApp({
 
         const saveSource = async () => {
             if (!newSource.name || !newSource.name.trim()) {
-                notify('请输入连接名称', 'error');
+                notify(t('source.nameRequired'), 'error');
                 return;
             }
-            if (newSource.type === 'mysql' && (!newSource.database || !newSource.database.trim())) {
-                notify('请选择或填写 MySQL 数据库名称', 'error');
+            if (['mysql', 'postgresql'].includes(newSource.type) && (!newSource.database || !newSource.database.trim())) {
+                notify(t('source.databaseRequired', { db: getProvider(newSource.type).displayName }), 'error');
                 return;
             }
             isLoading.value = true;
@@ -640,13 +705,13 @@ const app = createApp({
                 const res = await dbService.saveSource(newSource, isEditing.value ? editId.value : null);
                 if (res.success) {
                     showAddModal.value = false;
-                    notify('保存成功', 'success');
+                    notify(t('common.saved'), 'success');
                     await refreshTree();
                 } else {
-                    showMessage('保存失败: ' + res.error, '错误', 'error');
+                    showMessage(t('common.saveFailed', { error: res.error }), t('common.error'), 'error');
                 }
             } catch (e) {
-                showMessage('保存请求异常: ' + e.message, '错误', 'error');
+                showMessage(t('common.saveFailed', { error: e.message }), t('common.error'), 'error');
             } finally {
                 isLoading.value = false;
             }
@@ -659,41 +724,42 @@ const app = createApp({
             isLoading.value = true;
             try {
                 const payload = sourcePayload(source, {
-                    name: `${source.name || '连接'} 副本`,
+                    name: t('source.copyName', { name: source.name || t('source.defaultName') }),
                 });
                 const res = await dbService.saveSource(payload);
                 if (res.success) {
-                    notify('连接已复制', 'success');
+                    notify(t('source.duplicated'), 'success');
                     await refreshTree();
                 } else {
-                    showMessage('复制连接失败: ' + (res.error || '未知错误'), '错误', 'error');
+                    showMessage(t('source.duplicateFailed', { error: res.error || t('common.unknownError') }), t('common.error'), 'error');
                 }
             } catch (e) {
-                showMessage('复制连接请求异常: ' + e.message, '错误', 'error');
+                showMessage(t('source.duplicateFailed', { error: e.message }), t('common.error'), 'error');
             } finally {
                 isLoading.value = false;
             }
         };
 
         const deleteSource = async (source) => {
-            if (await showConfirm(`确定要删除数据源 "${source.name}" 吗？`)) {
+            if (await showConfirm(t('source.deleteConfirm', { name: source.name }))) {
                 try {
                     if (currentSource.value?.id === source.id) {
+                        cancelSourceSwitch();
                         aiChat.cancelGeneration();
                         closeObjectTabs(source.id);
                         currentSource.value = null;
                         currentTables.value = [];
                         expandedIds.value = expandedIds.value.filter(id => id !== source.id);
-                        sqlEditor.setValue('');
+                        sqlEditor.clearScript();
                         resetQueryResult();
                         if (source.db_type === 'redis') redis.resetRedisNavigator(source);
                     }
                     await dbService.deleteSource(source.id);
                     contextMenu.show = false;
-                    notify('删除成功', 'success');
+                    notify(t('common.deleted'), 'success');
                     await refreshTree();
                 } catch (e) {
-                    showMessage('删除失败: ' + e.message, '错误', 'error');
+                    showMessage(t('common.deleteFailed', { error: e.message }), t('common.error'), 'error');
                 }
             }
         };
@@ -758,9 +824,9 @@ const app = createApp({
                     document.body.removeChild(textarea);
                 }
                 contextMenu.show = false;
-                notify('已拷贝到剪贴板', 'success');
+                notify(t('common.copied'), 'success');
             } catch (e) {
-                showMessage('拷贝失败: ' + (e.message || e), '错误', 'error');
+                showMessage(t('common.copyFailed', { error: e.message || e }), t('common.error'), 'error');
             }
         };
 
@@ -813,7 +879,7 @@ const app = createApp({
                 reason: ''
             };
             if (!supportsResultEditing(source)) {
-                context.reason = '当前数据源暂不支持结果集编辑';
+                context.reason = 'edit.reasonUnsupportedSource';
                 return context;
             }
             if (source?.db_type === 'mongodb') {
@@ -831,13 +897,13 @@ const app = createApp({
                 context.primaryKey = pkResult.success ? pkResult.primary_key : null;
                 const pkColumns = normalizePrimaryKey(context.primaryKey);
                 if (!pkColumns.length) {
-                    context.reason = '表没有主键，结果集只读';
+                    context.reason = 'edit.reasonNoPrimaryKey';
                     return context;
                 }
                 context.enabled = true;
                 return context;
             } catch (e) {
-                context.reason = '获取主键/列信息失败，结果集只读';
+                context.reason = 'edit.reasonMetadataFailed';
                 return context;
             }
         };
@@ -849,15 +915,15 @@ const app = createApp({
                 table: '',
                 primaryKey: null,
                 columns: [],
-                reason: '结果无法定位到单个带主键的源表'
+                reason: 'edit.reasonNoSingleTable'
             };
             if (!supportsResultEditing(source)) {
-                context.reason = '当前数据源暂不支持结果集编辑';
+                context.reason = 'edit.reasonUnsupportedSource';
                 return context;
             }
             if (source?.db_type === 'mongodb') {
                 if (!columns.includes('_id')) {
-                    context.reason = '结果中缺少 _id，无法安全编辑';
+                    context.reason = 'edit.reasonMissingMongoId';
                     return context;
                 }
                 const table = getMongoEditableTable(query);
@@ -872,7 +938,7 @@ const app = createApp({
                     nullable: true
                 }));
                 context.enabled = Boolean(table);
-                context.reason = table ? '' : '无法识别 Mongo collection，无法安全编辑';
+                context.reason = table ? '' : 'edit.reasonUnknownCollection';
                 return context;
             }
             const metas = columns
@@ -884,7 +950,7 @@ const app = createApp({
                 .filter(item => item.meta.primary_key)
                 .map(item => item.displayColumn);
             if (!pkDisplayColumns.length) {
-                context.reason = '结果中缺少主键列，无法安全编辑';
+                context.reason = 'edit.reasonMissingPrimaryKey';
                 return context;
             }
             context.table = tables[0];
@@ -1024,7 +1090,7 @@ const app = createApp({
         };
 
         const copyInsertLabel = (table) => (
-            contextMenu.provider?.copyInsertLabel?.(table) || '复制 INSERT'
+            contextMenu.provider?.copyInsertLabel?.(table) || t('provider.copyInsert')
         );
 
         const copyInsert = async (table) => {
@@ -1048,7 +1114,7 @@ const app = createApp({
                 } catch (error) {
                     console.debug('Unable to build Redis SET command', error);
                 }
-                notify('无法读取 Redis 当前值', 'warning');
+                notify(t('redis.readValueFailed'), 'warning');
                 return;
             }
             copyToClipboard(provider.buildInsertQuery(table));
@@ -1082,7 +1148,7 @@ const app = createApp({
                         && inferredPkColumns.every(col => columns.includes(col))
                     ),
                     reason: inferredEditableContext.enabled && inferredPkColumns.some(col => !columns.includes(col))
-                        ? '结果中缺少主键列，无法安全编辑'
+                        ? 'edit.reasonMissingPrimaryKey'
                         : inferredEditableContext.reason
                 }
                 : {
@@ -1091,7 +1157,7 @@ const app = createApp({
                     table: '',
                     primaryKey: null,
                     columns: [],
-                    reason: '手写 SQL 结果默认只读'
+                    reason: 'edit.reasonManualSql'
                 };
             Object.assign(queryResult, {
                 providerId: data.provider_id || currentSource.value?.db_type || '',
@@ -1128,7 +1194,7 @@ const app = createApp({
             let query = queryOverride;
             if (!query) query = sqlEditor.getSelectedOrCurrentSql();
             if (!query || !query.trim() || !currentSource.value) {
-                if (!currentSource.value) notify('请先选择一个数据源', 'warning');
+                if (!currentSource.value) notify(t('common.selectSourceFirst'), 'warning');
                 return;
             }
 
@@ -1254,6 +1320,7 @@ const app = createApp({
                 },
             });
             refreshTree();
+            loadSavedLocale();
             window.addEventListener('click', () => { contextMenu.show = false; });
         });
 
@@ -1264,6 +1331,7 @@ const app = createApp({
         });
 
         return {
+            locale, localeMode, locales: LOCALES, changeLocale, elLocale,
             providers, currentProvider,
             tree, currentSource, currentTables, expandedIds, queryResult, chatHistory, aiInput, isLoading, isTesting, isGenerating,
             isSqlEditorReadOnly,
@@ -1366,6 +1434,7 @@ const app = createApp({
         };
     }
 });
+app.config.globalProperties.$t = t;
 if (typeof ElementPlus !== 'undefined') {
     app.use(ElementPlus);
 }

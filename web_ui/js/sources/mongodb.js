@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 import { buildMongoInsertOneCommand, mongoCollectionExpression } from '../utils/mongoCommands.js';
 
 const mongoMethods = [
@@ -15,17 +16,17 @@ export default {
     supportsCopyDDL: false,
 
     connFormFields: [
-        { key: 'host', label: '主机', type: 'text', flex: 2, placeholder: 'localhost' },
-        { key: 'port', label: '端口', type: 'number', flex: 1, placeholder: 27017 },
-        { key: 'user', label: '用户', type: 'text', flex: 1 },
-        { key: 'password', label: '密码', type: 'password', flex: 1 },
-        { key: 'database', label: '数据库名称', type: 'database-discover', flex: 1, placeholder: '例如: test' },
-        { key: 'auth_source', label: '认证源 (authSource)', type: 'text', flex: 1, placeholder: '例如: admin' },
+        { key: 'host', get label() { return t('field.host'); }, type: 'text', flex: 2, placeholder: 'localhost' },
+        { key: 'port', get label() { return t('field.port'); }, type: 'number', flex: 1, placeholder: 27017 },
+        { key: 'user', get label() { return t('field.user'); }, type: 'text', flex: 1 },
+        { key: 'password', get label() { return t('field.password'); }, type: 'password', flex: 1 },
+        { key: 'database', get label() { return t('field.database'); }, type: 'database-discover', flex: 1, get placeholder() { return t('field.example', { value: 'test' }); } },
+        { key: 'auth_source', get label() { return t('field.authSource'); }, type: 'text', flex: 1, get placeholder() { return t('field.example', { value: 'admin' }); } },
         {
             key: 'direct_connection',
-            label: '直接连接 (Direct Connection)',
+            get label() { return t('field.directConnection'); },
             type: 'checkbox',
-            hint: '开启后将跳过副本集发现。如果你在 Docker 外连接容器内的副本集且报错 internal hostnames，请勾选此项。',
+            get hint() { return t('field.directConnectionHint'); },
         },
     ],
 
@@ -77,7 +78,7 @@ export default {
     },
 
     copyInsertLabel() {
-        return '复制 insertOne';
+        return t('provider.copyCommand', { command: 'insertOne' });
     },
 
     buildInsertQuery(table, document = { field1: 'value1' }) {

@@ -5,7 +5,7 @@ import base64
 
 from fastapi import APIRouter
 
-from src.api.schemas import ConfigUpdateRequest, DBeaverImportRequest, ImportRequest
+from src.api.schemas import ConfigUpdateRequest, DBeaverImportRequest, ImportRequest, UiPreferencesRequest
 from src.services import config_service
 
 logger = logging.getLogger(__name__)
@@ -13,17 +13,27 @@ router = APIRouter()
 
 
 @router.get("/config")
-async def get_config():
+def get_config():
     return config_service.get_config()
 
 
 @router.post("/config")
-async def update_config(request: ConfigUpdateRequest):
+def update_config(request: ConfigUpdateRequest):
     return config_service.update_config(request.settings)
 
 
+@router.get("/ui-preferences")
+def get_ui_preferences():
+    return config_service.get_ui_preferences()
+
+
+@router.post("/ui-preferences")
+def update_ui_preferences(request: UiPreferencesRequest):
+    return config_service.update_ui_preferences(language=request.language)
+
+
 @router.get("/export-config")
-async def export_config():
+def export_config():
     try:
         return config_service.export_config()
     except Exception as e:
@@ -32,7 +42,7 @@ async def export_config():
 
 
 @router.post("/import-config")
-async def import_config_api(request: ImportRequest):
+def import_config_api(request: ImportRequest):
     try:
         return config_service.import_config(request.data_sources, request.system_config)
     except Exception as e:
@@ -41,7 +51,7 @@ async def import_config_api(request: ImportRequest):
 
 
 @router.post("/import-dbeaver-config")
-async def import_dbeaver_config_api(request: DBeaverImportRequest):
+def import_dbeaver_config_api(request: DBeaverImportRequest):
     try:
         content = base64.b64decode(request.content_base64)
         return config_service.import_dbeaver_file(request.filename, content)

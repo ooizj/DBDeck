@@ -63,14 +63,14 @@ export default {
         <el-dialog
             :model-value="show"
             @update:model-value="$emit('close')"
-            :title="isEditing ? '编辑连接' : '新建连接'"
+            :title="isEditing ? $t('menu.editConnection') : $t('toolbar.newConnection')"
             width="620px"
             destroy-on-close
             append-to-body
             class="source-form-dialog"
         >
             <el-form label-position="top" class="sf-form" @submit.prevent>
-                <el-form-item label="数据库类型" class="sf-type-item">
+                <el-form-item :label="$t('sourceForm.type')" class="sf-type-item">
                     <el-radio-group v-model="newSource.type" size="small" class="sf-type-group">
                         <el-radio-button v-for="p in providers" :key="p.id" :value="p.id">{{ p.displayName }}</el-radio-button>
                     </el-radio-group>
@@ -78,20 +78,20 @@ export default {
 
                 <div class="sf-grid">
                     <el-form-item style="grid-column: span 2;" required>
-                        <template #label>连接名称</template>
-                        <el-input v-model="newSource.name" placeholder="例如：生产订单库" />
+                        <template #label>{{ $t('sourceForm.name') }}</template>
+                        <el-input v-model="newSource.name" :placeholder="$t('sourceForm.namePlaceholder')" />
                     </el-form-item>
-                    <el-form-item label="分组" style="grid-column: span 2;">
-                        <el-select no-data-text="暂无分组，直接输入名称即可新建"
+                    <el-form-item :label="$t('sourceForm.group')" style="grid-column: span 2;">
+                        <el-select :no-data-text="$t('sourceForm.groupEmpty')"
                             v-model="newSource.group_name"
                             filterable allow-create default-first-option clearable
-                            placeholder="不分组，或选择 / 输入分组名">
+                            :placeholder="$t('sourceForm.groupPlaceholder')">
                             <el-option v-for="name in groupNames" :key="name" :label="name" :value="name" />
                         </el-select>
                     </el-form-item>
                 </div>
 
-                <div class="sf-section-title">连接信息</div>
+                <div class="sf-section-title">{{ $t('sourceForm.connectionInfo') }}</div>
                 <div class="sf-grid">
                     <template v-for="field in connectionFields" :key="field.key">
                         <el-form-item v-if="fieldVisible(field) && field.type === 'checkbox'" :style="fieldStyle(field)" class="sf-check-item">
@@ -101,7 +101,7 @@ export default {
                         <el-form-item v-else-if="fieldVisible(field) && field.type === 'database-discover'" :label="field.label" :style="fieldStyle(field)">
                             <el-input v-model="newSource[field.key]" :placeholder="field.placeholder">
                                 <template #append>
-                                    <el-button :loading="isDiscovering" :disabled="!newSource.host" @click="$emit('discover-databases')">获取列表</el-button>
+                                    <el-button :loading="isDiscovering" :disabled="!newSource.host" @click="$emit('discover-databases')">{{ $t('sourceForm.listDatabases') }}</el-button>
                                 </template>
                             </el-input>
                             <div v-if="availableDatabases && availableDatabases.length" class="sf-db-list">
@@ -125,7 +125,7 @@ export default {
                 <div v-if="sshToggleField" :class="['sf-ssh', { open: newSource.use_ssh_tunnel }]">
                     <div class="sf-ssh-header">
                         <el-switch v-model="newSource[sshToggleField.key]" size="small" />
-                        <span class="sf-ssh-title">通过 SSH 通道连接</span>
+                        <span class="sf-ssh-title">{{ $t('sourceForm.sshTitle') }}</span>
                         <span v-if="sshToggleField.hint" class="sf-ssh-hint">{{ sshToggleField.hint }}</span>
                     </div>
                     <div v-if="newSource.use_ssh_tunnel" class="sf-grid sf-ssh-grid">
@@ -145,10 +145,10 @@ export default {
 
             <template #footer>
                 <div class="sf-footer">
-                    <el-button @click="$emit('test-connection')" :loading="isTesting" :disabled="isLoading">测试连接</el-button>
+                    <el-button @click="$emit('test-connection')" :loading="isTesting" :disabled="isLoading">{{ $t('sourceForm.test') }}</el-button>
                     <span class="sf-footer-spacer"></span>
-                    <el-button @click="$emit('close')" :disabled="isLoading">取消</el-button>
-                    <el-button type="primary" @click="$emit('save-source')" :loading="isLoading">保存</el-button>
+                    <el-button @click="$emit('close')" :disabled="isLoading">{{ $t('common.cancel') }}</el-button>
+                    <el-button type="primary" @click="$emit('save-source')" :loading="isLoading">{{ $t('common.save') }}</el-button>
                 </div>
             </template>
         </el-dialog>

@@ -1,3 +1,5 @@
+import { t } from '../i18n/index.js';
+
 export default {
     inject: ['dbService'],
     props: {
@@ -21,7 +23,7 @@ export default {
     },
     computed: {
         title() {
-            return this.mode === 'backup' ? '备份数据库' : '导出数据';
+            return this.mode === 'backup' ? t('menu.backupDatabase') : t('backup.exportData');
         }
     },
     watch: {
@@ -55,11 +57,11 @@ export default {
         },
         async startBackup() {
             if (!this.selectedTables.length) {
-                this.error = '请选择至少一个表';
+                this.error = t('backup.needTable');
                 return;
             }
             if (!this.includeStructure && !this.includeData) {
-                this.error = '请至少选择表结构或数据中的一项';
+                this.error = t('backup.needContent');
                 return;
             }
 
@@ -78,10 +80,10 @@ export default {
                     this.backupResult = result;
                     this.savedPath = '';
                 } else {
-                    this.error = result.error || '备份失败';
+                    this.error = result.error || t('backup.failed');
                 }
             } catch (e) {
-                this.error = e.message || '备份失败';
+                this.error = e.message || t('backup.failed');
             } finally {
                 this.loading = false;
             }
@@ -98,10 +100,10 @@ export default {
                     if (result?.success) {
                         this.savedPath = result.path;
                     } else if (!result?.cancelled) {
-                        this.error = result?.error || '保存备份文件失败';
+                        this.error = result?.error || t('backup.saveFailed');
                     }
                 } catch (e) {
-                    this.error = e.message || '保存备份文件失败';
+                    this.error = e.message || t('backup.saveFailed');
                 }
                 return;
             }
@@ -115,12 +117,12 @@ export default {
             a.click();
             document.body.removeChild(a);
             window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-            this.savedPath = '已提交到浏览器下载目录';
+            this.savedPath = t('backup.browserDownload');
         },
         copyToClipboard() {
             if (!this.backupResult) return;
             navigator.clipboard.writeText(this.backupResult.content).then(() => {
-                ElementPlus.ElMessage.success('已复制到剪贴板');
+                ElementPlus.ElMessage.success(t('common.copied'));
             });
         }
     },
@@ -138,16 +140,16 @@ export default {
 
                 <div v-if="!backupResult">
                     <div class="backup-options">
-                        <el-checkbox v-model="includeStructure">包含表结构</el-checkbox>
-                        <el-checkbox v-model="includeData">包含数据</el-checkbox>
+                        <el-checkbox v-model="includeStructure">{{ $t('backup.includeStructure') }}</el-checkbox>
+                        <el-checkbox v-model="includeData">{{ $t('backup.includeData') }}</el-checkbox>
                     </div>
 
                     <div class="table-selector">
                         <div class="selector-header">
-                            <h4>选择表</h4>
+                            <h4>{{ $t('backup.selectTables') }}</h4>
                             <div class="selector-actions">
-                                <el-button size="small" @click="selectAll">全选</el-button>
-                                <el-button size="small" @click="deselectAll">取消全选</el-button>
+                                <el-button size="small" @click="selectAll">{{ $t('common.selectAll') }}</el-button>
+                                <el-button size="small" @click="deselectAll">{{ $t('common.deselectAll') }}</el-button>
                             </div>
                         </div>
 
@@ -164,34 +166,34 @@ export default {
                         </div>
 
                         <div class="selected-count">
-                            已选择 {{ selectedTables.length }} / {{ tables.length }} 个表
+                            {{ $t('backup.selectedCount', { selected: selectedTables.length, total: tables.length }) }}
                         </div>
                     </div>
                 </div>
 
                 <div v-else class="backup-result">
                     <div class="result-info">
-                        <p>备份内容已生成（尚未保存到磁盘）</p>
-                        <p>表数量: {{ backupResult.tables.length }}</p>
-                        <p>文件大小: {{ (backupResult.size / 1024).toFixed(2) }} KB</p>
-                        <p v-if="savedPath">保存位置: {{ savedPath }}</p>
+                        <p>{{ $t('backup.generated') }}</p>
+                        <p>{{ $t('backup.tableCount', { count: backupResult.tables.length }) }}</p>
+                        <p>{{ $t('backup.fileSize', { size: (backupResult.size / 1024).toFixed(2) }) }}</p>
+                        <p v-if="savedPath">{{ $t('backup.savedPath', { path: savedPath }) }}</p>
                     </div>
 
                     <div class="result-preview">
-                        <h4>预览</h4>
+                        <h4>{{ $t('backup.preview') }}</h4>
                         <pre>{{ backupResult.content.substring(0, 1000) }}{{ backupResult.content.length > 1000 ? '\\n...' : '' }}</pre>
                     </div>
                 </div>
             </div>
 
             <template #footer>
-                <el-button @click="$emit('close')">关闭</el-button>
+                <el-button @click="$emit('close')">{{ $t('common.close') }}</el-button>
                 <el-button v-if="!backupResult" type="primary" :loading="loading" :disabled="!selectedTables.length || (!includeStructure && !includeData)" @click="startBackup">
-                    {{ loading ? '备份中...' : '开始备份' }}
+                    {{ loading ? $t('backup.running') : $t('backup.start') }}
                 </el-button>
                 <template v-else>
-                    <el-button @click="copyToClipboard">复制</el-button>
-                    <el-button type="primary" @click="downloadBackup">下载 SQL 文件</el-button>
+                    <el-button @click="copyToClipboard">{{ $t('common.copy') }}</el-button>
+                    <el-button type="primary" @click="downloadBackup">{{ $t('backup.saveSql') }}</el-button>
                 </template>
             </template>
         </el-dialog>

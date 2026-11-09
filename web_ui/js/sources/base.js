@@ -17,6 +17,8 @@
  *   - childLabel                  树里子项的类型名（"table" / "collection"）
  */
 
+import { t } from '../i18n/index.js';
+
 export const defaults = {
     defaultPort: null,
     editorLanguage: 'plaintext',
@@ -27,32 +29,32 @@ export const defaults = {
     registerCompletion() { /* no-op */ },
     buildSelectQuery(table) { return `SELECT * FROM \`${table.name}\` LIMIT 100;`; },
     buildInsertQuery(table) { return `INSERT INTO \`${table.name}\` (...) VALUES (...);`; },
-    copyInsertLabel() { return '复制 INSERT'; },
+    copyInsertLabel() { return t('provider.copyInsert'); },
     buildPreviewQuery(table) { return this.buildSelectQuery(table); },
 };
 
 export const sshTunnelFields = [
     {
         key: 'use_ssh_tunnel',
-        label: '使用 SSH 通道',
+        get label() { return t('field.useSshTunnel'); },
         type: 'checkbox',
-        hint: '开启后会先连接 SSH 服务器，再通过本地隧道访问目标服务。',
+        get hint() { return t('field.useSshTunnelHint'); },
     },
-    { key: 'ssh_host', label: 'SSH 主机', type: 'text', placeholder: '例如: jump.example.com', visibleWhen: { key: 'use_ssh_tunnel', value: true } },
-    { key: 'ssh_port', label: 'SSH 端口', type: 'number', placeholder: 22, visibleWhen: { key: 'use_ssh_tunnel', value: true } },
-    { key: 'ssh_user', label: 'SSH 用户', type: 'text', visibleWhen: { key: 'use_ssh_tunnel', value: true } },
-    { key: 'ssh_password', label: 'SSH 密码', type: 'password', visibleWhen: { key: 'use_ssh_tunnel', value: true } },
+    { key: 'ssh_host', get label() { return t('field.sshHost'); }, type: 'text', get placeholder() { return t('field.example', { value: 'jump.example.com' }); }, visibleWhen: { key: 'use_ssh_tunnel', value: true } },
+    { key: 'ssh_port', get label() { return t('field.sshPort'); }, type: 'number', placeholder: 22, visibleWhen: { key: 'use_ssh_tunnel', value: true } },
+    { key: 'ssh_user', get label() { return t('field.sshUser'); }, type: 'text', visibleWhen: { key: 'use_ssh_tunnel', value: true } },
+    { key: 'ssh_password', get label() { return t('field.sshPassword'); }, type: 'password', visibleWhen: { key: 'use_ssh_tunnel', value: true } },
     {
         key: 'ssh_private_key',
-        label: 'SSH 私钥路径',
+        get label() { return t('field.sshPrivateKey'); },
         type: 'text',
-        placeholder: '例如: /Users/me/.ssh/id_rsa',
-        hint: '可选。填写本机私钥文件路径；如果使用密码登录可以留空。',
+        get placeholder() { return t('field.example', { value: '/Users/me/.ssh/id_rsa' }); },
+        get hint() { return t('field.sshPrivateKeyHint'); },
         visibleWhen: { key: 'use_ssh_tunnel', value: true },
     },
     {
         key: 'ssh_private_key_passphrase',
-        label: '私钥口令',
+        get label() { return t('field.sshPassphrase'); },
         type: 'password',
         visibleWhen: { key: 'use_ssh_tunnel', value: true },
     },

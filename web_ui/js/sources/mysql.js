@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 import { createSqlCompletion } from '../utils/sqlCompletion.js';
 import { mysqlFunctionsForVersion } from '../utils/sqlFunctions.js';
 
@@ -20,11 +21,11 @@ export default {
     supportsCopyDDL: true,
 
     connFormFields: [
-        { key: 'host', label: '主机', type: 'text', flex: 2, placeholder: 'localhost' },
-        { key: 'port', label: '端口', type: 'number', flex: 1, placeholder: 3306 },
-        { key: 'user', label: '用户', type: 'text', flex: 1 },
-        { key: 'password', label: '密码', type: 'password', flex: 1 },
-        { key: 'database', label: '数据库名称', type: 'database-discover', flex: 1, placeholder: '例如: test' },
+        { key: 'host', get label() { return t('field.host'); }, type: 'text', flex: 2, placeholder: 'localhost' },
+        { key: 'port', get label() { return t('field.port'); }, type: 'number', flex: 1, placeholder: 3306 },
+        { key: 'user', get label() { return t('field.user'); }, type: 'text', flex: 1 },
+        { key: 'password', get label() { return t('field.password'); }, type: 'password', flex: 1 },
+        { key: 'database', get label() { return t('field.database'); }, type: 'database-discover', flex: 1, get placeholder() { return t('field.example', { value: 'test' }); } },
     ],
 
     registerCompletion(monaco, ctx) {

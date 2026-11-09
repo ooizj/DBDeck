@@ -11,6 +11,7 @@ from urllib.parse import quote_plus
 from src.common.sql_utils import serialize_row
 from src.sources.base import DataSourceClient
 from src.sources.ssh_tunnel import close_ssh_tunnel, open_ssh_tunnel
+from src.common.i18n import msg
 
 try:
     import pymongo
@@ -62,7 +63,7 @@ def _build_uri(config_dict: Dict[str, Any], *, use_auth_source_in_path: bool = F
 class MongoDBClient(DataSourceClient):
     def __init__(self, config_dict: Dict[str, Any]) -> None:
         if not pymongo:
-            raise ImportError("pymongo 未安装，请先 pip install pymongo")
+            raise ImportError(msg("pymongo 未安装，请先 pip install pymongo", "pymongo is not installed; run pip install pymongo"))
         self.config = dict(config_dict)
         host = self.config.get("host", "localhost")
         port = int(self.config.get("port") or 27017)
@@ -94,8 +95,8 @@ class MongoDBClient(DataSourceClient):
         except Exception as e:
             return {
                 "success": False,
-                "error": f"解析失败: {e}",
-                "error_msg": f"解析失败: {e}",
+                "error": msg(f"解析失败: {e}", f"Failed to parse: {e}"),
+                "error_msg": msg(f"解析失败: {e}", f"Failed to parse: {e}"),
                 "statements": statement_results,
                 "duration_ms": round((time.perf_counter() - total_start) * 1000, 2),
             }
@@ -103,8 +104,8 @@ class MongoDBClient(DataSourceClient):
         if not parsed_statements:
             return {
                 "success": False,
-                "error": "MongoDB 命令不能为空",
-                "error_msg": "MongoDB 命令不能为空",
+                "error": msg("MongoDB 命令不能为空", "The MongoDB command is empty"),
+                "error_msg": msg("MongoDB 命令不能为空", "The MongoDB command is empty"),
                 "statements": statement_results,
                 "duration_ms": round((time.perf_counter() - total_start) * 1000, 2),
             }
@@ -166,8 +167,8 @@ class MongoDBClient(DataSourceClient):
         if not collection_name:
             return {
                 "success": False,
-                "error": "必须提供 collection 字段",
-                "error_msg": "必须提供 collection 字段",
+                "error": msg("必须提供 collection 字段", "The collection field is required"),
+                "error_msg": msg("必须提供 collection 字段", "The collection field is required"),
                 "duration_ms": round((time.perf_counter() - statement_start) * 1000, 2),
             }
 
@@ -287,8 +288,8 @@ class MongoDBClient(DataSourceClient):
                 if not key:
                     return with_duration({
                         "success": False,
-                        "error": "distinct 操作必须指定 key",
-                        "error_msg": "distinct 操作必须指定 key",
+                        "error": msg("distinct 操作必须指定 key", "distinct requires a key"),
+                        "error_msg": msg("distinct 操作必须指定 key", "distinct requires a key"),
                     })
                 filter_query = cmd.get("filter", {})
                 values = coll.distinct(key, filter_query)
@@ -300,8 +301,8 @@ class MongoDBClient(DataSourceClient):
                 })
             return with_duration({
                 "success": False,
-                "error": f"不支持的 action: {action}",
-                "error_msg": f"不支持的 action: {action}",
+                "error": msg(f"不支持的 action: {action}", f"Unsupported action: {action}"),
+                "error_msg": msg(f"不支持的 action: {action}", f"Unsupported action: {action}"),
             })
         except Exception as e:
             logger.error(f"MongoDB error: {e}", exc_info=True)
@@ -402,7 +403,7 @@ class MongoDBClient(DataSourceClient):
                     parsed_args.append(None)
                 else:
                     if arg.startswith('{') or arg.startswith('['):
-                        raise ValueError(f"语法错误: 无法解析的对象或列表: {arg}")
+                        raise ValueError(msg(f"语法错误: 无法解析的对象或列表: {arg}", f"Syntax error: cannot parse object or array: {arg}"))
                     if (arg.startswith('"') and arg.endswith('"')) or (arg.startswith("'") and arg.endswith("'")):
                         parsed_args.append(arg[1:-1])
                     else:
@@ -537,7 +538,7 @@ class MongoDBClient(DataSourceClient):
                 parsed: List[tuple[str, Dict[str, Any]]] = []
                 for item in payload:
                     if not isinstance(item, dict):
-                        raise ValueError("MongoDB JSON 数组中的每一项都必须是对象")
+                        raise ValueError(msg("MongoDB JSON 数组中的每一项都必须是对象", "Every item in a MongoDB JSON array must be an object"))
                     parsed.append((json.dumps(item, ensure_ascii=False), item))
                 return parsed
             if isinstance(payload, dict):
@@ -559,7 +560,7 @@ class MongoDBClient(DataSourceClient):
                 return json.loads(query_str)
             except json.JSONDecodeError as e:
                 if query_str.startswith("{") or query_str.startswith("["):
-                    raise ValueError(f"JSON 语法错误: {e}")
+                    raise ValueError(msg(f"JSON 语法错误: {e}", f"JSON syntax error: {e}"))
                 pass
                 
         # 提取 db.collection
@@ -694,12 +695,12 @@ class MongoDBClient(DataSourceClient):
                 if parsed_args:
                     cmd["skip"] = int(parsed_args[0])
             else:
-                raise ValueError(f"不支持的 MongoDB 方法或存在拼写错误: {method_name}")
+                raise ValueError(msg(f"不支持的 MongoDB 方法或存在拼写错误: {method_name}", f"Unsupported or misspelled MongoDB method: {method_name}"))
 
         while idx < len(query_str) and query_str[idx].isspace():
             idx += 1
         if idx < len(query_str):
-            raise ValueError(f"MongoDB 命令尾部存在无法解析的内容: {query_str[idx:]}")
+            raise ValueError(msg(f"MongoDB 命令尾部存在无法解析的内容: {query_str[idx:]}", f"Unparsable content at the end of the MongoDB command: {query_str[idx:]}"))
 
         return cmd
 

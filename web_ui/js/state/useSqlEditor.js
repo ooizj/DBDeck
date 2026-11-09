@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 import { splitSqlStatementsWithOffsets } from '../utils/sqlHelpers.js';
 import { updateEditorReadOnly } from '../utils/editorState.js';
 
@@ -19,6 +20,8 @@ export function useSqlEditor({
     let autoSaveTimer = null;
     let suggestDetailsTimer = null;
     let isApplyingScript = false;
+    // 编辑器当前内容所属的数据源 id；保存脚本只写回这个数据源，避免切换中途把 A 的内容写进 B
+    let scriptSourceId = null;
     // 已注册过 completion provider 的 Monaco language id，避免重复注册
     const registeredLanguages = new Set();
     // 每个数据源 provider 各自的补全实现（MySQL/PostgreSQL/SQLite 共用 Monaco 的 mysql 语言，需按当前 provider 分派）
@@ -30,6 +33,15 @@ export function useSqlEditor({
     const getValue = () => (editor ? editor.getValue() : '');
     const setValue = (sql) => {
         if (editor) editor.setValue(sql || '');
+    };
+    // 关闭/删除当前连接时清空编辑器，内容不再属于任何数据源
+    const clearScript = () => {
+        if (autoSaveTimer) {
+            clearTimeout(autoSaveTimer);
+            autoSaveTimer = null;
+        }
+        scriptSourceId = null;
+        setEditorScript('');
     };
     const layout = () => {
         if (editor) editor.layout();
@@ -57,21 +69,25 @@ export function useSqlEditor({
         if (!source || !editor) return;
         try {
             const res = await dbService.getScript(source.id);
-            if (res.success) setEditorScript(res.content || '');
+            // 请求期间已切走/断开该连接：丢弃结果，避免把旧连接的脚本显示到编辑器
+            if (getCurrentSource()?.id !== source.id) return;
+            if (res.success) {
+                scriptSourceId = source.id;
+                setEditorScript(res.content || '');
+            }
         } catch (e) {
             console.error('Failed to fetch script', e);
         }
     };
 
     const saveCurrentSourceScript = async () => {
-        const source = getCurrentSource();
-        if (!source || !editor) return;
         if (autoSaveTimer) {
             clearTimeout(autoSaveTimer);
             autoSaveTimer = null;
         }
+        if (!scriptSourceId || !editor) return;
         try {
-            await dbService.saveScript(source.id, editor.getValue());
+            await dbService.saveScript(scriptSourceId, editor.getValue());
         } catch (e) {
             console.error('Failed to save script', e);
         }
@@ -110,7 +126,7 @@ export function useSqlEditor({
         if (!entry.serverVersion) {
             entry.serverVersion = cached(
                 dbService.getServerVersion(entry.sourceId).then((res) => {
-                    if (!res.success) throw new Error(res.error || '获取服务器版本失败');
+                    if (!res.success) throw new Error(res.error || t('editor.serverVersionFailed'));
                     return res.version || '';
                 }),
                 () => { entry.serverVersion = null; },
@@ -125,7 +141,7 @@ export function useSqlEditor({
         if (!entry.databases) {
             entry.databases = cached(
                 dbService.getDatabases(entry.sourceId).then((res) => {
-                    if (!res.success) throw new Error(res.error || '获取数据库列表失败');
+                    if (!res.success) throw new Error(res.error || t('editor.databasesFailed'));
                     return res.databases || [];
                 }),
                 () => { entry.databases = null; },
@@ -140,7 +156,7 @@ export function useSqlEditor({
         if (!entry.schemas.has(database)) {
             entry.schemas.set(database, cached(
                 dbService.getDatabaseSchema(entry.sourceId, database).then((res) => {
-                    if (!res.success) throw new Error(res.error || '获取表结构失败');
+                    if (!res.success) throw new Error(res.error || t('editor.schemaFailed'));
                     const comments = res.table_comments || {};
                     return Object.entries(res.tables || {}).map(([name, columns]) => ({
                         name,
@@ -196,11 +212,11 @@ export function useSqlEditor({
         if (!editor) return;
         const fmt = window.sqlFormatter;
         if (!fmt) {
-            notify('SQL 格式化库未加载', 'warning');
+            notify(t('editor.formatterMissing'), 'warning');
             return;
         }
         if (typeof fmt.format !== 'function') {
-            notify('sqlFormatter 对象异常', 'error');
+            notify(t('editor.formatterInvalid'), 'error');
             return;
         }
         const selection = editor.getSelection();
@@ -218,9 +234,9 @@ export function useSqlEditor({
                 const fullRange = editor.getModel().getFullModelRange();
                 editor.executeEdits('format', [{ range: fullRange, text: formatted }]);
             }
-            notify('格式化完成', 'success');
+            notify(t('editor.formatted'), 'success');
         } catch (e) {
-            notify('格式化失败: ' + e.message, 'error');
+            notify(t('editor.formatFailed', { error: e.message }), 'error');
         }
     };
 
@@ -334,7 +350,7 @@ export function useSqlEditor({
                     return;
                 }
                 if (autoSaveTimer) clearTimeout(autoSaveTimer);
-                const sourceId = getCurrentSource()?.id;
+                const sourceId = scriptSourceId;
                 const content = editor.getValue();
                 autoSaveTimer = setTimeout(() => {
                     if (sourceId) dbService.saveScript(sourceId, content);
@@ -351,6 +367,7 @@ export function useSqlEditor({
         getEditor,
         getValue,
         setValue,
+        clearScript,
         layout,
         applyEditorLanguage,
         loadSourceScript,

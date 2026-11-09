@@ -1,3 +1,5 @@
+import { t } from '../i18n/index.js';
+
 export default {
     inject: ['dbService'],
     props: {
@@ -36,26 +38,30 @@ export default {
                 if (result.success) {
                     this.sessions = result.sessions || [];
                 } else {
-                    this.error = result.error || '加载失败';
+                    this.error = result.error || t('common.loadFailed');
                 }
             } catch (e) {
-                this.error = e.message || '加载失败';
+                this.error = e.message || t('common.loadFailed');
             } finally {
                 this.loading = false;
             }
         },
         async killSession(sessionId) {
-            try { await ElementPlus.ElMessageBox.confirm(`确定要终止会话 ${sessionId} 吗？`, '确认', { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' }); } catch { return; }
+            try {
+                await ElementPlus.ElMessageBox.confirm(t('sessions.killConfirm', { id: sessionId }), t('common.confirm'), {
+                    type: 'warning', confirmButtonText: t('common.ok'), cancelButtonText: t('common.cancel'),
+                });
+            } catch { return; }
 
             try {
                 const result = await this.dbService.killSession(this.sourceId, sessionId);
                 if (result.success) {
                     await this.loadSessions();
                 } else {
-                    ElementPlus.ElMessage.error(result.error || '终止失败');
+                    ElementPlus.ElMessage.error(result.error || t('sessions.killFailed'));
                 }
             } catch (e) {
-                ElementPlus.ElMessage.error(e.message || '终止失败');
+                ElementPlus.ElMessage.error(e.message || t('sessions.killFailed'));
             }
         },
         toggleAutoRefresh() {
@@ -100,10 +106,10 @@ export default {
         >
             <template #header>
                 <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; padding-right: 24px;">
-                    <span style="font-size: 16px; font-weight: 600;">会话管理 - {{ sourceName }}</span>
+                    <span style="font-size: 16px; font-weight: 600;">{{ $t('sessions.title', { name: sourceName }) }}</span>
                     <div>
-                        <el-button :type="autoRefresh ? 'primary' : 'default'" size="small" @click="toggleAutoRefresh" title="自动刷新">🔄 自动</el-button>
-                        <el-button size="small" @click="loadSessions" title="刷新">↻ 刷新</el-button>
+                        <el-button :type="autoRefresh ? 'primary' : 'default'" size="small" @click="toggleAutoRefresh" :title="$t('sessions.autoRefreshTitle')">🔄 {{ $t('sessions.autoRefresh') }}</el-button>
+                        <el-button size="small" @click="loadSessions" :title="$t('common.refresh')">↻ {{ $t('common.refresh') }}</el-button>
                     </div>
                 </div>
             </template>
@@ -112,11 +118,11 @@ export default {
                 <div v-if="error" class="error-message">{{ error }}</div>
 
                 <div v-if="loading && !sessions.length" class="loading">
-                    加载中...
+                    {{ $t('common.loading') }}
                 </div>
 
                 <div v-else-if="!sessions.length" class="empty-state">
-                    暂无活跃会话
+                    {{ $t('sessions.empty') }}
                 </div>
 
                 <div v-else class="session-table-wrapper">
@@ -124,14 +130,14 @@ export default {
                         <thead>
                             <tr>
                                 <th>ID</th>
-                                <th>用户</th>
-                                <th>来源</th>
-                                <th>数据库</th>
-                                <th>状态</th>
-                                <th>命令</th>
-                                <th>运行时间</th>
+                                <th>{{ $t('sessions.colUser') }}</th>
+                                <th>{{ $t('sessions.colHost') }}</th>
+                                <th>{{ $t('sessions.colDatabase') }}</th>
+                                <th>{{ $t('sessions.colState') }}</th>
+                                <th>{{ $t('sessions.colCommand') }}</th>
+                                <th>{{ $t('sessions.colTime') }}</th>
                                 <th>SQL</th>
-                                <th>操作</th>
+                                <th>{{ $t('sessions.colActions') }}</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -151,7 +157,7 @@ export default {
                                     {{ session.info || '-' }}
                                 </td>
                                 <td>
-                                    <el-button type="danger" size="small" @click="killSession(session.id)" title="终止会话">终止</el-button>
+                                    <el-button type="danger" size="small" @click="killSession(session.id)" :title="$t('sessions.killTitle')">{{ $t('sessions.kill') }}</el-button>
                                 </td>
                             </tr>
                         </tbody>
@@ -160,8 +166,8 @@ export default {
             </div>
 
             <template #footer>
-                <span style="float: left; color: var(--el-text-color-secondary); line-height: 32px;">共 {{ sessions.length }} 个会话</span>
-                <el-button @click="$emit('close')">关闭</el-button>
+                <span style="float: left; color: var(--el-text-color-secondary); line-height: 32px;">{{ $t('sessions.count', { count: sessions.length }) }}</span>
+                <el-button @click="$emit('close')">{{ $t('common.close') }}</el-button>
             </template>
         </el-dialog>
     `

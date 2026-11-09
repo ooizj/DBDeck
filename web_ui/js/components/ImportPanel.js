@@ -1,3 +1,6 @@
+import { languageHeaders } from '../api.js';
+import { t } from '../i18n/index.js';
+
 export default {
     props: ['sourceId', 'sources'],
     emits: ['close', 'imported'],
@@ -42,10 +45,10 @@ export default {
             formData.append('source_id', sourceId);
             formData.append('table_name', tableName);
             formData.append('mode', mode);
-            const response = await fetch('/api/import', { method: 'POST', body: formData });
+            const response = await fetch('/api/import', { method: 'POST', body: formData, headers: languageHeaders() });
             if (!response.ok) {
-                const data = await response.json().catch(() => ({ detail: 'Import failed' }));
-                throw new Error(data.detail || data.error || 'Import failed');
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.detail || data.error || t('import.failed'));
             }
             return response.json();
         }
@@ -59,45 +62,45 @@ export default {
         <el-dialog
             :model-value="true"
             @update:model-value="$emit('close')"
-            title="导入数据"
+            :title="$t('menu.importData')"
             width="520px"
             destroy-on-close
             append-to-body
         >
             <el-form label-position="top" class="import-form" @submit.prevent>
-                <el-form-item label="目标连接">
+                <el-form-item :label="$t('migrate.target')">
                     <div class="import-target">{{ targetSource ? targetSource.name : '-' }}<small v-if="targetSource?.database">{{ targetSource.database }}</small></div>
                 </el-form-item>
-                <el-form-item label="数据文件">
+                <el-form-item :label="$t('import.file')">
                     <div class="import-file">
-                        <el-button @click="$refs.fileInput.click()">选择文件…</el-button>
-                        <span :class="['import-file-name', { empty: !file }]">{{ file ? file.name : '支持 CSV、Excel（.xlsx），第一行为列名' }}</span>
+                        <el-button @click="$refs.fileInput.click()">{{ $t('settings.chooseFile') }}</el-button>
+                        <span :class="['import-file-name', { empty: !file }]">{{ file ? file.name : $t('import.fileHint') }}</span>
                         <input ref="fileInput" type="file" accept=".csv,.xlsx" @change="handleFileChange" style="display: none;">
                     </div>
                 </el-form-item>
-                <el-form-item label="导入方式">
+                <el-form-item :label="$t('import.mode')">
                     <el-radio-group v-model="mode">
-                        <el-radio value="create">新建表</el-radio>
-                        <el-radio value="append">追加到已有表</el-radio>
+                        <el-radio value="create">{{ $t('import.modeCreate') }}</el-radio>
+                        <el-radio value="append">{{ $t('import.modeAppend') }}</el-radio>
                     </el-radio-group>
-                    <div class="field-hint">{{ mode === 'create' ? '按文件内容推断列类型建表；表名已存在时会自动加上行数后缀。' : '列名需要与已有表的列一致。' }}</div>
+                    <div class="field-hint">{{ mode === 'create' ? $t('import.modeCreateHint') : $t('import.modeAppendHint') }}</div>
                 </el-form-item>
-                <el-form-item label="表名">
-                    <el-input v-model="tableName" placeholder="默认使用文件名" />
+                <el-form-item :label="$t('import.tableName')">
+                    <el-input v-model="tableName" :placeholder="$t('import.tableNamePlaceholder')" />
                 </el-form-item>
             </el-form>
 
             <el-alert
                 v-if="result"
-                :title="result.success ? ('导入成功：表 ' + result.table_name + '，共 ' + result.rows_imported + ' 行') : result.error"
+                :title="result.success ? $t('import.success', { table: result.table_name, rows: result.rows_imported }) : result.error"
                 :type="result.success ? 'success' : 'error'"
                 show-icon
                 :closable="false"
             />
 
             <template #footer>
-                <el-button @click="$emit('close')">{{ result?.success ? '完成' : '取消' }}</el-button>
-                <el-button type="primary" @click="doImport" :loading="importing" :disabled="!file">开始导入</el-button>
+                <el-button @click="$emit('close')">{{ result?.success ? $t('common.done') : $t('common.cancel') }}</el-button>
+                <el-button type="primary" @click="doImport" :loading="importing" :disabled="!file">{{ $t('import.start') }}</el-button>
             </template>
         </el-dialog>
     `

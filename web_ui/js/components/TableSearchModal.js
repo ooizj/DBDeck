@@ -3,24 +3,28 @@
  * 先向后端要搜索计划（每张表的候选字段），再逐表并发搜索，可随时停止。
  */
 import { bytesToBase64, saveFile, timestampedFilename } from '../utils/saveFile.js';
+import { t } from '../i18n/index.js';
 
 const CONCURRENCY = 3;
 const DETAIL_PAGE_SIZE = 100;
 const TABLE_PREVIEW_LIMIT = 300;
 // "按表"视图每张表最多渲染的行数，避免不限行数时一次渲染过多 DOM；全部数据可通过导出查看
 const GROUP_VIEW_ROW_LIMIT = 200;
-const DETAIL_HEADERS = ['数据库', '来源表', '记录ID', '匹配字段', '字段注释', '匹配内容'];
+const detailHeaders = () => [
+    t('search.colDatabase'), t('search.colTable'), t('search.colRecordId'),
+    t('search.colColumn'), t('search.colComment'), t('search.colValue'),
+];
 
 const COLUMN_TYPE_OPTIONS = [
-    { value: 'string', label: '字符串' },
-    { value: 'number', label: '数字' },
-    { value: 'datetime', label: '日期时间' },
+    { value: 'string', labelKey: 'search.typeString' },
+    { value: 'number', labelKey: 'search.typeNumber' },
+    { value: 'datetime', labelKey: 'search.typeDatetime' },
 ];
 
 const MATCH_MODE_OPTIONS = [
-    { value: 'contains', label: '包含' },
-    { value: 'equals', label: '完全匹配' },
-    { value: 'prefix', label: '开头是' },
+    { value: 'contains', labelKey: 'search.modeContains' },
+    { value: 'equals', labelKey: 'search.modeEquals' },
+    { value: 'prefix', labelKey: 'search.modePrefix' },
 ];
 
 const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
@@ -59,7 +63,7 @@ function detailRecord(row) {
 /** 明细 CSV；带 BOM，Excel 直接打开中文不乱码。 */
 export function buildSearchCsv(detailRows) {
     const quote = (text) => `"${String(text).replace(/"/g, '""')}"`;
-    const lines = [DETAIL_HEADERS, ...detailRows.map(detailRecord)].map(cells => cells.map(quote).join(','));
+    const lines = [detailHeaders(), ...detailRows.map(detailRecord)].map(cells => cells.map(quote).join(','));
     return '\ufeff' + lines.join('\n');
 }
 
@@ -78,11 +82,11 @@ export function sheetName(name, used) {
 /** XLSX 内容：第一个工作表是明细，之后每张命中的表一个工作表（完整行，命中字段在前面标出）。 */
 export function buildSearchSheets(hits, detailRows, { multiDatabase = false } = {}) {
     const used = new Set();
-    const sheets = [{ name: sheetName('搜索明细', used), header: DETAIL_HEADERS, rows: detailRows.map(detailRecord) }];
+    const sheets = [{ name: sheetName(t('search.detailSheet'), used), header: detailHeaders(), rows: detailRows.map(detailRecord) }];
     for (const hit of hits) {
         sheets.push({
             name: sheetName(multiDatabase ? `${hit.database}.${hit.table}` : hit.table, used),
-            header: ['命中字段', ...hit.columns],
+            header: [t('search.matchedColumns'), ...hit.columns],
             rows: hit.rows.map((row, i) => [(hit.matched[i] || []).join(', '), ...row.map(cellText)]),
         });
     }
@@ -138,10 +142,10 @@ export default {
             return this.sourceType === 'sqlite';
         },
         databaseLabel() {
-            return this.sourceType === 'postgresql' ? '模式' : '数据库';
+            return this.sourceType === 'postgresql' ? t('search.schema') : t('search.colDatabase');
         },
         databasePlaceholder() {
-            return `全部${this.databaseLabel}`;
+            return this.sourceType === 'postgresql' ? t('search.allSchemas') : t('search.allDatabases');
         },
         progressPercent() {
             if (!this.progress.total) return this.running ? 0 : 100;
@@ -150,10 +154,10 @@ export default {
         keywordTags() {
             const info = this.keywordInfo;
             if (!info) return [];
-            const tags = [`文本 “${info.text}”`];
-            if (info.number !== null && info.number !== undefined) tags.push(`数字 = ${info.number}`);
-            if (info.date) tags.push(`日期 ${info.date.start} ~ ${info.date.end || '之后'}`);
-            if (info.time) tags.push(`时间 ${info.time.start} ~ ${info.time.end || '23:59:59'}`);
+            const tags = [t('search.tagText', { text: info.text })];
+            if (info.number !== null && info.number !== undefined) tags.push(t('search.tagNumber', { value: info.number }));
+            if (info.date) tags.push(t('search.tagDate', { start: info.date.start, end: info.date.end || t('search.onwards') }));
+            if (info.time) tags.push(t('search.tagTime', { start: info.time.start, end: info.time.end || '23:59:59' }));
             return tags;
         },
         multiDatabase() {
@@ -175,17 +179,19 @@ export default {
         statusText() {
             if (!this.searchedOnce && !this.running) return '';
             const { done, total, tableCount } = this.progress;
-            const parts = [`${this.running ? '搜索中' : '搜索完成'}：${done} / ${total} 张表`];
-            if (tableCount > total) parts.push(`另有 ${tableCount - total} 张表没有可搜索的字段`);
-            parts.push(`命中 ${this.hits.length} 张表、${this.hitRowCount} 行、${this.detailRows.length} 个字段`);
-            return parts.join('，');
+            const parts = [t(this.running ? 'search.progressRunning' : 'search.progressDone', { done, total })];
+            if (tableCount > total) parts.push(t('search.noSearchableColumns', { count: tableCount - total }));
+            parts.push(t('search.hitSummary', { tables: this.hits.length, rows: this.hitRowCount, cells: this.detailRows.length }));
+            return parts.join(t('search.partSeparator'));
         },
         previewLabel() {
             const p = this.tablePreview;
-            if (p.loading) return '统计中…';
-            if (p.error) return '表列表读取失败';
+            if (p.loading) return t('result.counting');
+            if (p.error) return t('search.previewFailed');
             const filtered = this.form.tableInclude.trim() || this.form.tableExclude.trim();
-            return filtered ? `将搜索 ${p.tables.length} / ${p.total} 张表` : `将搜索全部 ${p.total} 张表`;
+            return filtered
+                ? t('search.previewFiltered', { count: p.tables.length, total: p.total })
+                : t('search.previewAll', { total: p.total });
         },
         previewTables() {
             return this.tablePreview.tables.slice(0, TABLE_PREVIEW_LIMIT);
@@ -223,7 +229,7 @@ export default {
             try {
                 const res = await this.dbService.getTableSearchDatabases(this.sourceId);
                 if (!res.success) {
-                    this.error = res.error || '读取数据库列表失败';
+                    this.error = res.error || t('editor.databasesFailed');
                     return;
                 }
                 this.currentDatabase = res.current || '';
@@ -232,7 +238,7 @@ export default {
                 if (!this.isSqlite && this.currentDatabase) this.form.databases = [this.currentDatabase];
                 this.refreshTablePreview();
             } catch (e) {
-                this.error = e.message || '读取数据库列表失败';
+                this.error = e.message || t('editor.databasesFailed');
             }
             this.$nextTick(() => this.$refs.keywordInput?.focus?.());
         },
@@ -258,10 +264,10 @@ export default {
                 if (this.tablePreview.key !== key) return;
                 this.tablePreview = res.success
                     ? { loading: false, tables: res.tables || [], total: res.total || 0, error: '', key }
-                    : { loading: false, tables: [], total: 0, error: res.error || '读取失败', key };
+                    : { loading: false, tables: [], total: 0, error: res.error || t('common.loadFailed'), key };
             } catch (e) {
                 if (this.tablePreview.key === key) {
-                    this.tablePreview = { loading: false, tables: [], total: 0, error: e.message || '读取失败', key };
+                    this.tablePreview = { loading: false, tables: [], total: 0, error: e.message || t('common.loadFailed'), key };
                 }
             }
         },
@@ -279,11 +285,11 @@ export default {
         async startSearch() {
             if (this.running) return;
             if (!this.form.keyword.trim()) {
-                this.error = '请输入关键字';
+                this.error = t('search.keywordRequired');
                 return;
             }
             if (!this.form.columnTypes.length) {
-                this.error = '请至少选择一种字段类型';
+                this.error = t('search.typeRequired');
                 return;
             }
             this.error = '';
@@ -303,7 +309,7 @@ export default {
                 const plan = await this.dbService.planTableSearch({ ...criteria, ...this.scopePayload() });
                 if (token !== this.runToken) return;
                 if (!plan.success) {
-                    this.error = plan.error || '生成搜索计划失败';
+                    this.error = plan.error || t('search.planFailed');
                     return;
                 }
                 this.searchedOnce = true;
@@ -319,7 +325,7 @@ export default {
                 };
                 await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
             } catch (e) {
-                if (token === this.runToken) this.error = e.message || '搜索失败';
+                if (token === this.runToken) this.error = e.message || t('search.failed');
             } finally {
                 if (token === this.runToken) this.running = false;
             }
@@ -334,7 +340,7 @@ export default {
             if (token !== this.runToken) return;
             this.progress.done += 1;
             if (!res.success) {
-                this.failures.push({ database: target.database, table: target.table, error: res.error || '搜索失败' });
+                this.failures.push({ database: target.database, table: target.table, error: res.error || t('search.failed') });
                 return;
             }
             if (!res.rows?.length) return;
@@ -387,7 +393,7 @@ export default {
             return parts.length ? parts : [{ text, hit: false }];
         },
         hitCountLabel(hit) {
-            return hit.has_more ? `${hit.rows.length}+ 行` : `${hit.rows.length} 行`;
+            return t('history.rows', { count: hit.has_more ? `${hit.rows.length}+` : hit.rows.length });
         },
         groupRows(hit) {
             return hit.rows.slice(0, GROUP_VIEW_ROW_LIMIT);
@@ -397,7 +403,7 @@ export default {
         },
         exportFileName(ext) {
             const safeKeyword = (this.keywordInfo?.text || 'result').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 30);
-            return timestampedFilename(`全表搜索_${safeKeyword}`, ext);
+            return timestampedFilename(`${t('search.filePrefix')}_${safeKeyword}`, ext);
         },
         async exportResults(format) {
             if (!this.hits.length) return;
@@ -406,7 +412,7 @@ export default {
                 return;
             }
             if (typeof XLSX === 'undefined') {
-                ElementPlus.ElMessage.error('XLSX 库未加载');
+                ElementPlus.ElMessage.error(t('result.xlsxMissing'));
                 return;
             }
             const workbook = XLSX.utils.book_new();
@@ -429,7 +435,7 @@ export default {
         >
             <template #header>
                 <div class="ts-title">
-                    <span class="ts-title-text">全表搜索</span>
+                    <span class="ts-title-text">{{ $t('menu.searchAllTables') }}</span>
                     <span v-if="sourceName" class="ts-title-source">{{ sourceName }}</span>
                 </div>
             </template>
@@ -438,65 +444,65 @@ export default {
                 <div class="ts-searchbar">
                     <el-input ref="keywordInput" v-model="form.keyword" size="large" clearable :disabled="running"
                         class="ts-keyword"
-                        placeholder="输入关键字：文本、数字或日期（如 张三、1024、2024-01-15、2024/01、2024-01-15 10:30），回车搜索"
+                        :placeholder="$t('search.keywordPlaceholder')"
                         @keyup.enter="startSearch">
                         <template #prefix><span class="ts-keyword-icon">⌕</span></template>
                     </el-input>
                     <el-radio-group v-model="form.matchMode" size="large" :disabled="running" class="ts-match">
-                        <el-radio-button v-for="o in matchModeOptions" :key="o.value" :value="o.value">{{ o.label }}</el-radio-button>
+                        <el-radio-button v-for="o in matchModeOptions" :key="o.value" :value="o.value">{{ $t(o.labelKey) }}</el-radio-button>
                     </el-radio-group>
-                    <el-button v-if="!running" type="primary" size="large" class="ts-go" @click="startSearch" :disabled="!form.keyword.trim()">搜索</el-button>
-                    <el-button v-else type="danger" size="large" class="ts-go" @click="stop">停止</el-button>
+                    <el-button v-if="!running" type="primary" size="large" class="ts-go" @click="startSearch" :disabled="!form.keyword.trim()">{{ $t('search.search') }}</el-button>
+                    <el-button v-else type="danger" size="large" class="ts-go" @click="stop">{{ $t('ai.stop') }}</el-button>
                 </div>
 
                 <div class="ts-conditions">
                     <div class="ts-cond-row">
-                        <span class="ts-cond-label">范围</span>
+                        <span class="ts-cond-label">{{ $t('search.scope') }}</span>
                         <el-select v-if="!isSqlite" v-model="form.databases" multiple collapse-tags collapse-tags-tooltip
                             filterable clearable :disabled="running" :placeholder="databasePlaceholder"
-                            no-data-text="无数据" no-match-text="无匹配数据" class="ts-db">
-                            <el-option v-for="d in databaseOptions" :key="d" :value="d" :label="d === currentDatabase ? d + '（当前）' : d" />
+                            class="ts-db">
+                            <el-option v-for="d in databaseOptions" :key="d" :value="d" :label="d === currentDatabase ? $t('search.current', { name: d }) : d" />
                         </el-select>
-                        <el-input v-model="form.tableInclude" clearable :disabled="running" class="ts-grow" placeholder="多个用逗号或空格分隔，支持 * 通配">
-                            <template #prepend>表名包含</template>
+                        <el-input v-model="form.tableInclude" clearable :disabled="running" class="ts-grow" :placeholder="$t('search.tableIncludePlaceholder')">
+                            <template #prepend>{{ $t('search.tableInclude') }}</template>
                         </el-input>
-                        <el-input v-model="form.tableExclude" clearable :disabled="running" class="ts-grow" placeholder="如 log, *_bak">
-                            <template #prepend>不包含</template>
+                        <el-input v-model="form.tableExclude" clearable :disabled="running" class="ts-grow" :placeholder="$t('field.example', { value: 'log, *_bak' })">
+                            <template #prepend>{{ $t('search.tableExclude') }}</template>
                         </el-input>
                         <el-popover placement="bottom-end" :width="360" trigger="click">
                             <template #reference>
                                 <span class="ts-preview-link" :class="{ 'is-error': tablePreview.error }">{{ previewLabel }} ▾</span>
                             </template>
                             <div class="ts-preview-list">
-                                <div v-if="!previewTables.length" class="ts-muted">没有匹配的表</div>
+                                <div v-if="!previewTables.length" class="ts-muted">{{ $t('migrate.noMatch') }}</div>
                                 <div v-for="t in previewTables" :key="t.database + '.' + t.table" class="ts-preview-item">
                                     <span v-if="!isSqlite" class="ts-muted">{{ t.database }}.</span>{{ t.table }}
                                 </div>
                                 <div v-if="tablePreview.tables.length > previewTables.length" class="ts-muted">
-                                    …… 还有 {{ tablePreview.tables.length - previewTables.length }} 张
+                                    {{ $t('search.moreTables', { count: tablePreview.tables.length - previewTables.length }) }}
                                 </div>
                             </div>
                         </el-popover>
                     </div>
                     <div class="ts-cond-row">
-                        <span class="ts-cond-label">字段</span>
+                        <span class="ts-cond-label">{{ $t('object.columns') }}</span>
                         <el-checkbox-group v-model="form.columnTypes" :disabled="running" class="ts-types">
-                            <el-checkbox-button v-for="o in columnTypeOptions" :key="o.value" :value="o.value">{{ o.label }}</el-checkbox-button>
+                            <el-checkbox-button v-for="o in columnTypeOptions" :key="o.value" :value="o.value">{{ $t(o.labelKey) }}</el-checkbox-button>
                         </el-checkbox-group>
-                        <el-input v-model="form.columnName" clearable :disabled="running" class="ts-grow" placeholder="可选，如 name、time">
-                            <template #prepend>字段名包含</template>
+                        <el-input v-model="form.columnName" clearable :disabled="running" class="ts-grow" :placeholder="$t('search.columnNamePlaceholder')">
+                            <template #prepend>{{ $t('search.columnName') }}</template>
                         </el-input>
-                        <span class="ts-inline-label">每表最多</span>
+                        <span class="ts-inline-label">{{ $t('search.limitPerTable') }}</span>
                         <el-input-number v-model="form.limit" :min="1" :max="100000000" :step="50" :precision="0"
                             controls-position="right" :disabled="running || form.unlimited" class="ts-limit" />
-                        <el-tooltip content="返回每张表全部命中行；命中很多时会比较慢、占用内存，可随时停止" placement="top">
-                            <el-checkbox v-model="form.unlimited" :disabled="running">不限</el-checkbox>
+                        <el-tooltip :content="$t('search.unlimitedTip')" placement="top">
+                            <el-checkbox v-model="form.unlimited" :disabled="running">{{ $t('search.unlimited') }}</el-checkbox>
                         </el-tooltip>
                     </div>
                     <div class="ts-cond-row">
-                        <span class="ts-cond-label">过滤</span>
+                        <span class="ts-cond-label">{{ $t('search.filter') }}</span>
                         <el-input v-model="form.where" clearable :disabled="running" class="ts-grow ts-where"
-                            placeholder="可选，附加到每张表的条件，如 status = 1 AND created_at >= '2024-01-01'；缺少这些字段的表会自动跳过"
+                            :placeholder="$t('search.wherePlaceholder')"
                             @keyup.enter="startSearch">
                             <template #prepend>WHERE</template>
                         </el-input>
@@ -511,25 +517,25 @@ export default {
                             :status="running ? '' : 'success'" />
                         <span class="ts-status-text">{{ statusText }}</span>
                         <span v-if="failures.length" class="ts-failure-link" @click="showFailures = !showFailures">
-                            {{ failures.length }} 张表失败 {{ showFailures ? '▴' : '▾' }}
+                            {{ $t('search.failedTables', { count: failures.length }) }} {{ showFailures ? '▴' : '▾' }}
                         </span>
                         <el-dropdown trigger="click" :disabled="!hits.length" @command="exportResults">
-                            <el-button size="small" :disabled="!hits.length">导出结果 ▾</el-button>
+                            <el-button size="small" :disabled="!hits.length">{{ $t('search.export') }} ▾</el-button>
                             <template #dropdown>
                                 <el-dropdown-menu>
-                                    <el-dropdown-item command="xlsx">Excel（明细 + 每张表的完整行）</el-dropdown-item>
-                                    <el-dropdown-item command="csv">CSV（明细）</el-dropdown-item>
+                                    <el-dropdown-item command="xlsx">{{ $t('search.exportXlsx') }}</el-dropdown-item>
+                                    <el-dropdown-item command="csv">{{ $t('search.exportCsv') }}</el-dropdown-item>
                                 </el-dropdown-menu>
                             </template>
                         </el-dropdown>
                         <el-radio-group v-model="viewMode" size="small" class="ts-view">
-                            <el-radio-button value="detail">明细</el-radio-button>
-                            <el-radio-button value="table">按表</el-radio-button>
+                            <el-radio-button value="detail">{{ $t('search.viewDetail') }}</el-radio-button>
+                            <el-radio-button value="table">{{ $t('search.viewByTable') }}</el-radio-button>
                         </el-radio-group>
                     </div>
                     <div v-if="keywordTags.length || warnings.length" class="ts-status-sub">
-                        <span class="ts-muted">关键字识别为</span>
-                        <span v-for="t in keywordTags" :key="t" class="ts-chip">{{ t }}</span>
+                        <span class="ts-muted">{{ $t('search.keywordAs') }}</span>
+                        <span v-for="tag in keywordTags" :key="tag" class="ts-chip">{{ tag }}</span>
                         <span v-for="w in warnings" :key="w" class="ts-warning">⚠ {{ w }}</span>
                     </div>
                     <div v-if="showFailures" class="ts-failures">
@@ -542,11 +548,11 @@ export default {
 
                 <div class="ts-results">
                     <div v-if="!searchedOnce && !running" class="ts-empty">
-                        <div class="ts-empty-title">在多张表里查找数据</div>
-                        <div>字符串字段按文本匹配；数字关键字只在数字字段上等值匹配；</div>
-                        <div>日期关键字按时间范围匹配日期时间字段，并同时匹配字符串里的 2024-01-15 / 2024/01/15 / 20240115 等写法。</div>
+                        <div class="ts-empty-title">{{ $t('search.introTitle') }}</div>
+                        <div>{{ $t('search.introLine1') }}</div>
+                        <div>{{ $t('search.introLine2') }}</div>
                     </div>
-                    <div v-else-if="!running && !hits.length" class="ts-empty">没有找到匹配的数据</div>
+                    <div v-else-if="!running && !hits.length" class="ts-empty">{{ $t('search.noResults') }}</div>
 
                     <template v-else-if="viewMode === 'detail'">
                         <div class="ts-detail-wrap">
@@ -555,12 +561,12 @@ export default {
                                     <tr>
                                         <th class="ts-col-index">#</th>
                                         <th v-if="multiDatabase">{{ databaseLabel }}</th>
-                                        <th>来源表</th>
-                                        <th>记录ID</th>
-                                        <th>匹配字段</th>
-                                        <th>字段注释</th>
-                                        <th>匹配内容</th>
-                                        <th class="ts-col-actions">操作</th>
+                                        <th>{{ $t('search.colTable') }}</th>
+                                        <th>{{ $t('search.colRecordId') }}</th>
+                                        <th>{{ $t('search.colColumn') }}</th>
+                                        <th>{{ $t('search.colComment') }}</th>
+                                        <th>{{ $t('search.colValue') }}</th>
+                                        <th class="ts-col-actions">{{ $t('sessions.colActions') }}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -575,7 +581,7 @@ export default {
                                             <template v-for="(part, pi) in highlight(row.value)" :key="pi"><mark v-if="part.hit">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template>
                                         </td>
                                         <td class="ts-col-actions">
-                                            <el-button size="small" text @click="$emit('copy', formatCell(row.value))">复制</el-button>
+                                            <el-button size="small" text @click="$emit('copy', formatCell(row.value))">{{ $t('common.copy') }}</el-button>
                                         </td>
                                     </tr>
                                 </tbody>
@@ -597,7 +603,7 @@ export default {
                                     <span v-for="c in hit.matchedColumns" :key="c" class="ts-tag">{{ c }}</span>
                                 </span>
                                 <span class="ts-hit-actions" @click.stop>
-                                    <el-button size="small" text @click="$emit('copy', hit.sql)">复制 SQL</el-button>
+                                    <el-button size="small" text @click="$emit('copy', hit.sql)">{{ $t('ai.copySql') }}</el-button>
                                 </span>
                             </div>
                             <div v-if="expanded[hit.key]" class="ts-grid-wrap">
@@ -614,7 +620,7 @@ export default {
                                     </tbody>
                                 </table>
                                 <div v-if="groupRowsHidden(hit)" class="ts-grid-more">
-                                    还有 {{ groupRowsHidden(hit) }} 行未在此展示，可切换到“明细”或导出 Excel 查看全部
+                                    {{ $t('search.moreRows', { count: groupRowsHidden(hit) }) }}
                                 </div>
                             </div>
                         </div>

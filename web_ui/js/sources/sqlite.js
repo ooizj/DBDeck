@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 import mysqlProvider, { sqlKeywords } from './mysql.js';
 import { createSqlCompletion } from '../utils/sqlCompletion.js';
 
@@ -18,11 +19,11 @@ export default {
     connFormFields: [
         {
             key: 'database',
-            label: '数据库路径（相对项目根目录或绝对路径）',
+            get label() { return t('field.sqlitePath'); },
             type: 'text',
             flex: 1,
-            placeholder: '例如: data/my_db.sqlite',
-            hint: '如果文件不存在，系统将自动尝试创建。',
+            get placeholder() { return t('field.example', { value: '/Users/me/data/my_db.sqlite' }); },
+            get hint() { return t('field.sqlitePathHint'); },
         },
     ],
 };

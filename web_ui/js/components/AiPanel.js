@@ -1,3 +1,6 @@
+import { t } from '../i18n/index.js';
+import { messageText } from '../state/useAiChat.js';
+
 export default {
     props: ['chatHistory', 'modelValue', 'isGenerating', 'aiWidth'],
     emits: ['update:modelValue', 'ask', 'stop', 'clear', 'export', 'set-sql', 'copy'],
@@ -18,6 +21,7 @@ export default {
         }
     },
     methods: {
+        messageText,
         escapeHtml(value) {
             return String(value)
                 .replace(/&/g, '&amp;')
@@ -30,7 +34,7 @@ export default {
             if (!c) return '';
             const escaped = this.escapeHtml(c);
             let h = escaped.replace(/[\n\s]*&lt;(think|thought|thinking)&gt;([\s\S]*?)&lt;\/\1&gt;[\n\s]*/g, (m, t, content) =>
-                `<details class="ai-think"><summary>思考过程 (点击展开)</summary><div class="ai-think-content">${content.trim()}</div></details>`
+                `<details class="ai-think"><summary>${this.escapeHtml(t('ai.thinking'))}</summary><div class="ai-think-content">${content.trim()}</div></details>`
             );
             return h.trim().replace(/\n/g, '<br>');
         },
@@ -57,36 +61,36 @@ export default {
         <div class="ai-panel" :style="{ width: aiWidth + 'px' }">
             <div class="ai-header">
                 <div>
-                    <div class="ai-title-main">AI Assistant</div>
-                    <div class="ai-title-sub">Schema, SQL, analysis</div>
+                    <div class="ai-title-main">{{ $t('ai.title') }}</div>
+                    <div class="ai-title-sub">{{ $t('ai.subtitle') }}</div>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center;">
-                    <button class="header-btn" @click="$emit('clear')" title="新建对话">新建</button>
-                    <button v-if="chatHistory.length > 1" class="header-btn" @click="$emit('export')" title="导出聊天记录">导出</button>
-                    <button v-if="isGenerating" class="stop-btn-mini" @click="$emit('stop')">停止</button>
+                    <button class="header-btn" @click="$emit('clear')" :title="$t('ai.newChatTitle')">{{ $t('ai.newChat') }}</button>
+                    <button v-if="chatHistory.length > 1" class="header-btn" @click="$emit('export')" :title="$t('ai.exportTitle')">{{ $t('common.export') }}</button>
+                    <button v-if="isGenerating" class="stop-btn-mini" @click="$emit('stop')">{{ $t('ai.stop') }}</button>
                 </div>
             </div>
             <div class="ai-chat" ref="chatBox">
                 <div v-for="(msg, i) in chatHistory" :key="i" :class="['chat-message', msg.role]">
                     <div v-if="msg.role !== 'tool_log'" class="chat-bubble" :class="{ collapsed: msg.collapsed, error: msg.isError }" @click="msg.role === 'ai' && msg.collapsed && (msg.collapsed = false)">
                         <div class="chat-header" v-if="msg.role === 'ai'" @click.stop="msg.collapsed = !msg.collapsed">
-                            <span class="ai-title">AI 助手</span>
-                            <span class="expand-hint" v-if="msg.collapsed">点击展开</span>
-                            <span class="collapse-icon" v-else>折叠</span>
+                            <span class="ai-title">{{ $t('ai.title') }}</span>
+                            <span class="expand-hint" v-if="msg.collapsed">{{ $t('ai.expand') }}</span>
+                            <span class="collapse-icon" v-else>{{ $t('ai.collapse') }}</span>
                         </div>
-                        <div v-if="msg.role === 'ai'" v-show="!msg.collapsed" v-html="parseMessage(msg.content)"></div>
-                        <div v-else>{{ msg.content }}</div>
+                        <div v-if="msg.role === 'ai'" v-show="!msg.collapsed" v-html="parseMessage(messageText(msg))"></div>
+                        <div v-else>{{ messageText(msg) }}</div>
                         <div v-if="((msg.queries && msg.queries.length) || msg.sql) && !msg.collapsed" class="ai-sql-preview">
                             <code>{{ msg.queries && msg.queries.length ? msg.queries.join('\\n') : msg.sql }}</code>
                             <button class="copy-sql-btn" @click.stop="$emit('copy', msg.queries && msg.queries.length ? msg.queries.join('\\n') : msg.sql)">
-                                <span style="margin-right: 4px;">📋</span> Copy SQL
+                                <span style="margin-right: 4px;">📋</span> {{ $t('ai.copySql') }}
                             </button>
                         </div>
                     </div>
                     <div v-else :class="['skill-log', { success: msg.done }]">
                         <span class="icon">{{ msg.done ? '✓' : '⚙' }}</span>
-                        <span class="type-tag">Tool</span>
-                        <span>{{ msg.done ? 'Executed' : 'Executing' }} <b>{{ msg.tool }}</b></span>
+                        <span class="type-tag">{{ $t('ai.tool') }}</span>
+                        <span>{{ msg.done ? $t('ai.toolDone') : $t('ai.toolRunning') }} <b>{{ msg.tool }}</b></span>
                     </div>
                 </div>
             </div>
@@ -99,8 +103,8 @@ export default {
                         @compositionend="handleCompositionEnd"
                         @keydown.enter.exact.prevent="handleEnter" 
                         :disabled="isGenerating" 
-                        placeholder="询问 AI... (Enter 发送, Shift+Enter 换行)"></textarea>
-                    <button class="toolbar-btn primary" @click="$emit('ask')" :disabled="!modelValue.trim() || isGenerating">发送</button>
+                        :placeholder="$t('ai.inputPlaceholder')"></textarea>
+                    <button class="toolbar-btn primary" @click="$emit('ask')" :disabled="!modelValue.trim() || isGenerating">{{ $t('ai.send') }}</button>
                 </div>
             </div>
         </div>

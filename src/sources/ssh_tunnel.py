@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, Optional, Tuple
+from src.common.i18n import msg
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +29,12 @@ def open_ssh_tunnel(
     ssh_host = clean_str(config_dict.get("ssh_host"))
     ssh_user = clean_str(config_dict.get("ssh_user"))
     if not ssh_host or not ssh_user:
-        raise ValueError("启用 SSH 通道时必须填写 SSH 主机和 SSH 用户")
+        raise ValueError(msg("启用 SSH 通道时必须填写 SSH 主机和 SSH 用户名", "SSH host and SSH username are required when the SSH tunnel is enabled"))
 
     try:
         from sshtunnel import SSHTunnelForwarder
     except ImportError as exc:
-        raise RuntimeError("SSH 通道依赖未安装，请先 pip install sshtunnel") from exc
+        raise RuntimeError(msg("SSH 通道依赖未安装，请先 pip install sshtunnel", "SSH tunnel support is not installed; run pip install sshtunnel")) from exc
 
     ssh_password = clean_str(config_dict.get("ssh_password"))
     ssh_private_key = clean_str(config_dict.get("ssh_private_key"))

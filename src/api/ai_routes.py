@@ -22,5 +22,5 @@ async def chat(request: QueryRequest):
 
 
 @router.post("/clear-chat")
-async def clear_chat(request: ClearChatRequest | None = Body(default=None)):
+def clear_chat(request: ClearChatRequest | None = Body(default=None)):
     return ai_service.clear_chat(request.session_id if request else None)

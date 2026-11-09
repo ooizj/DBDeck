@@ -1,3 +1,5 @@
+import { t } from '../i18n/index.js';
+
 // 执行计划节点（递归）：一行显示操作与对象，下方缩进显示子节点；点击行展开该节点的全部指标
 const PlanNode = {
     name: 'PlanNode',
@@ -7,7 +9,8 @@ const PlanNode = {
     },
     computed: {
         summaryMetrics() {
-            return (this.node.metrics || []).filter(m => ['成本', '估算行数'].includes(m.key));
+            // 后端用 id 标记摘要指标（key 是随界面语言变化的显示名）
+            return (this.node.metrics || []).filter(m => ['cost', 'rows'].includes(m.id));
         },
         hasMetrics() {
             return (this.node.metrics || []).length > 0;
@@ -56,9 +59,9 @@ export default {
         views() {
             if (!this.planData) return [];
             const views = [];
-            if (this.planData.tree) views.push({ key: 'tree', label: '树形' });
-            if (this.planData.table?.columns?.length) views.push({ key: 'table', label: '表格' });
-            if (this.planData.raw !== null && this.planData.raw !== undefined) views.push({ key: 'raw', label: '原始' });
+            if (this.planData.tree) views.push({ key: 'tree', label: t('explain.viewTree') });
+            if (this.planData.table?.columns?.length) views.push({ key: 'table', label: t('explain.viewTable') });
+            if (this.planData.raw !== null && this.planData.raw !== undefined) views.push({ key: 'raw', label: t('explain.viewRaw') });
             return views;
         },
         treeHasMetrics() {
@@ -79,8 +82,8 @@ export default {
     },
     methods: {
         async loadPlan() {
-            if (!this.query || !this.query.trim()) { this.error = '没有可分析的 SQL'; this.loading = false; return; }
-            if (!this.sourceId) { this.error = '未选择数据源'; this.loading = false; return; }
+            if (!this.query || !this.query.trim()) { this.error = t('explain.needSql'); this.loading = false; return; }
+            if (!this.sourceId) { this.error = t('common.selectSourceFirst'); this.loading = false; return; }
 
             this.loading = true;
             this.error = null;
@@ -88,7 +91,7 @@ export default {
 
             // 超时兜底：无论后端是否阻塞，15 秒后一定结束 loading 并报错
             const timeout = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('分析超时（15 秒）。请检查数据库连接，或简化 SQL 后重试。')), 15000)
+                setTimeout(() => reject(new Error(t('explain.timeout'))), 15000)
             );
             try {
                 const result = await Promise.race([
@@ -99,10 +102,10 @@ export default {
                     this.planData = result;
                     this.viewMode = this.views[0]?.key || 'tree';
                 } else {
-                    this.error = (result && result.error) || '获取执行计划失败';
+                    this.error = (result && result.error) || t('explain.failed');
                 }
             } catch (e) {
-                this.error = e.message || '获取执行计划失败';
+                this.error = e.message || t('explain.failed');
             } finally {
                 this.loading = false;
             }
@@ -119,7 +122,7 @@ export default {
         <el-dialog
             :model-value="show"
             @update:model-value="$emit('close')"
-            title="执行计划"
+            :title="$t('editor.explain')"
             width="1000px"
             destroy-on-close
             append-to-body
@@ -132,7 +135,7 @@ export default {
 
                 <div v-if="loading" class="explain-loading">
                     <span class="spinner-small"></span>
-                    正在分析执行计划…
+                    {{ $t('explain.loading') }}
                 </div>
 
                 <template v-else-if="planData">
@@ -141,8 +144,8 @@ export default {
                             <el-radio-button v-for="view in views" :key="view.key" :value="view.key">{{ view.label }}</el-radio-button>
                         </el-radio-group>
                         <span class="explain-meta">
-                            <span v-if="planData.planning_time != null">规划耗时 {{ formatMs(planData.planning_time) }}</span>
-                            <span v-if="viewMode === 'tree' && treeHasMetrics" class="muted">点击节点查看全部指标</span>
+                            <span v-if="planData.planning_time != null">{{ $t('explain.planningTime', { time: formatMs(planData.planning_time) }) }}</span>
+                            <span v-if="viewMode === 'tree' && treeHasMetrics" class="muted">{{ $t('explain.clickNode') }}</span>
                         </span>
                     </div>
 
@@ -168,8 +171,8 @@ export default {
             </div>
 
             <template #footer>
-                <el-button @click="$emit('close')">关闭</el-button>
-                <el-button type="primary" @click="loadPlan" :loading="loading">重新分析</el-button>
+                <el-button @click="$emit('close')">{{ $t('common.close') }}</el-button>
+                <el-button type="primary" @click="loadPlan" :loading="loading">{{ $t('explain.rerun') }}</el-button>
             </template>
         </el-dialog>
     `

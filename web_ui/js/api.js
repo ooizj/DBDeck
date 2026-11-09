@@ -1,10 +1,16 @@
+import { getLocale, t } from './i18n/index.js';
+
+// 后端按 X-DBDeck-Language 返回对应语言的提示/错误信息（见 src/common/i18n.py）。
+export const languageHeaders = () => ({ 'X-DBDeck-Language': getLocale() });
+
 export const fetchApi = async (path, options = {}) => {
-    const response = await fetch(`/api${path}`, { 
-        ...options, 
-        headers: { 
-            'Content-Type': 'application/json', 
-            ...options.headers 
-        } 
+    const response = await fetch(`/api${path}`, {
+        ...options,
+        headers: {
+            'Content-Type': 'application/json',
+            ...languageHeaders(),
+            ...options.headers
+        }
     });
     if (!response.ok) {
         let errorData;
@@ -17,7 +23,7 @@ export const fetchApi = async (path, options = {}) => {
                 errorData = { detail: response.statusText };
             }
         }
-        const errMsg = errorData?.detail || errorData?.error || errorData?.message || response.statusText || '请求失败';
+        const errMsg = errorData?.detail || errorData?.error || errorData?.message || response.statusText || t('common.requestFailed');
         const err = new Error(errMsg);
         err.status = response.status;
         err.detail = errMsg;
@@ -76,6 +82,11 @@ export const dbService = {
         body: JSON.stringify({ session_id: sessionId })
     }),
     getConfig: () => fetchApi('/config'),
+    getUiPreferences: () => fetchApi('/ui-preferences'),
+    saveUiPreferences: (preferences) => fetchApi('/ui-preferences', {
+        method: 'POST',
+        body: JSON.stringify(preferences),
+    }),
     saveConfig: (settings) => fetchApi('/config', { 
         method: 'POST', 
         body: JSON.stringify({ settings }) 

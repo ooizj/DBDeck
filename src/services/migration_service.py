@@ -4,6 +4,7 @@ from fastapi import HTTPException
 
 from src.services.source_service import resolve_source
 from src.sources.sql_migration import migrate_table, supports_sql_migration
+from src.common.i18n import msg
 
 
 def migrate_tables(src_id: int, dest_id: int, tables: list[str]) -> dict:
@@ -18,10 +19,10 @@ def migrate_tables(src_id: int, dest_id: int, tables: list[str]) -> dict:
         ):
             return {
                 "success": False,
-                "error": "Migration is only supported between SQL-family sources",
+                "error": msg("迁移仅支持在 SQL 类数据源之间进行", "Migration is only supported between SQL data sources"),
             }
         if not (supports_sql_migration(src_db) and supports_sql_migration(dest_db)):
-            return {"success": False, "error": "迁移仅支持 SQL-family 数据源间进行"}
+            return {"success": False, "error": msg("迁移仅支持在 SQL 类数据源之间进行", "Migration is only supported between SQL data sources")}
 
         details = []
         for table in tables:

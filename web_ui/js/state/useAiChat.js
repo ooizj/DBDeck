@@ -1,8 +1,12 @@
 import { useAiSession } from './useAiSession.js';
+import { t, getLocale } from '../i18n/index.js';
+import { languageHeaders } from '../api.js';
 
 const { ref, nextTick } = Vue;
 
-const WELCOME_MESSAGE = '欢迎来到 DBDeck。选择左侧连接后，可以让我解释结构、生成查询或分析结果。';
+// 本地生成的提示消息只存 messageKey，由 AiPanel 按当前界面语言渲染（切换语言后也会跟着变）。
+const localMessage = (messageKey, extra = {}) => ({ role: 'ai', content: '', messageKey, ...extra });
+export const messageText = (msg) => (msg?.messageKey ? t(msg.messageKey, msg.messageParams) : (msg?.content ?? ''));
 
 const readOnlyEditable = (reason) => ({
     enabled: false,
@@ -17,7 +21,7 @@ const readOnlyEditable = (reason) => ({
  * AI 面板：流式对话（NDJSON 事件）、写操作确认、导出和清空。
  */
 export function useAiChat({ dbService, getCurrentSource, queryResult, notify, showMessage, showConfirm }) {
-    const chatHistory = ref([{ role: 'ai', content: WELCOME_MESSAGE }]);
+    const chatHistory = ref([localMessage('ai.welcome')]);
     const aiInput = ref('');
     const isGenerating = ref(false);
     const showConfirmModal = ref(false);
@@ -47,7 +51,7 @@ export function useAiChat({ dbService, getCurrentSource, queryResult, notify, sh
             operationKind: data.operation_kind || '',
             statements: data.statements || [],
             activeStatementIndex: data.active_statement_index || 0,
-            editable: readOnlyEditable('AI 查询结果默认只读'),
+            editable: readOnlyEditable('edit.reasonAiResult'),
         });
     };
 
@@ -86,7 +90,7 @@ export function useAiChat({ dbService, getCurrentSource, queryResult, notify, sh
             }
             applyFinalData(e.data);
         } else if (e.type === 'error') {
-            chatHistory.value.push({ role: 'ai', content: '❌ 错误: ' + e.message, isFinal: true, isError: true });
+            chatHistory.value.push(localMessage('ai.errorMessage', { messageParams: { error: e.message }, isFinal: true, isError: true }));
         }
         scrollChatToBottom();
     };
@@ -98,7 +102,7 @@ export function useAiChat({ dbService, getCurrentSource, queryResult, notify, sh
         if (showAsUser) chatHistory.value.push({ role: 'user', content: queryText });
         try {
             const response = await fetch('/api/query', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                method: 'POST', headers: { 'Content-Type': 'application/json', ...languageHeaders() },
                 body: JSON.stringify({
                     query: queryText,
                     source_id: getCurrentSource()?.id,
@@ -118,8 +122,8 @@ export function useAiChat({ dbService, getCurrentSource, queryResult, notify, sh
                 for (const line of lines) { if (line.trim()) handleAIEvent(JSON.parse(line)); }
             }
         } catch (e) {
-            if (e.name === 'AbortError') chatHistory.value.push({ role: 'ai', content: '已停止生成。', isFinal: true, collapsed: false });
-            else chatHistory.value.push({ role: 'ai', content: '错误: ' + e.message });
+            if (e.name === 'AbortError') chatHistory.value.push(localMessage('ai.stopped', { isFinal: true, collapsed: false }));
+            else chatHistory.value.push(localMessage('ai.errorMessage', { messageParams: { error: e.message }, isFinal: true, isError: true }));
         } finally { isGenerating.value = false; abortController = null; }
     };
 
@@ -137,7 +141,9 @@ export function useAiChat({ dbService, getCurrentSource, queryResult, notify, sh
         showConfirmModal.value = false;
         chatHistory.value.push({
             role: 'ai',
-            content: `✓ 用户已确认：${calls.map(c => c.tool).join(', ')}`,
+            content: '',
+            messageKey: 'ai.userApproved',
+            messageParams: { tools: calls.map(c => c.tool).join(', ') },
             isFinal: true,
             isSystem: true
         });
@@ -151,7 +157,8 @@ export function useAiChat({ dbService, getCurrentSource, queryResult, notify, sh
         showConfirmModal.value = false;
         chatHistory.value.push({
             role: 'ai',
-            content: '✗ 用户已拒绝执行该批次操作。',
+            content: '',
+            messageKey: 'ai.userRejected',
             isFinal: true,
             isSystem: true
         });
@@ -161,34 +168,34 @@ export function useAiChat({ dbService, getCurrentSource, queryResult, notify, sh
 
     const buildChatMarkdown = () => {
         const currentSource = getCurrentSource();
-        let markdown = '# 数据库客户端 AI 对话记录\n\n';
-        markdown += `导出时间: ${new Date().toLocaleString('zh-CN')}\n\n`;
+        let markdown = `# ${t('aiExport.title')}\n\n`;
+        markdown += `${t('aiExport.exportedAt', { time: new Date().toLocaleString(getLocale() === 'zh' ? 'zh-CN' : 'en-US') })}\n\n`;
         if (currentSource) {
-            markdown += `数据源: ${currentSource.name} (${currentSource.database})\n\n`;
+            markdown += `${t('aiExport.source', { name: currentSource.name, database: currentSource.database })}\n\n`;
         }
         markdown += '---\n\n';
         let messageIndex = 0;
         chatHistory.value.forEach((msg, idx) => {
             if (msg.role === 'user') {
                 messageIndex++;
-                markdown += `## 用户 (${messageIndex})\n\n${msg.content}\n\n`;
+                markdown += `## ${t('aiExport.user')} (${messageIndex})\n\n${messageText(msg)}\n\n`;
             } else if (msg.role === 'ai') {
                 messageIndex++;
-                markdown += `## AI 助手 (${messageIndex})\n\n${msg.content}\n\n`;
-                if (msg.queries?.length) markdown += `**执行的查询:**\n\`\`\`\n${msg.queries.join('\n')}\n\`\`\`\n\n`;
-                else if (msg.sql) markdown += `**执行的查询:**\n\`\`\`\n${msg.sql}\n\`\`\`\n\n`;
+                markdown += `## ${t('ai.title')} (${messageIndex})\n\n${messageText(msg)}\n\n`;
+                if (msg.queries?.length) markdown += `**${t('aiExport.queries')}**\n\`\`\`\n${msg.queries.join('\n')}\n\`\`\`\n\n`;
+                else if (msg.sql) markdown += `**${t('aiExport.queries')}**\n\`\`\`\n${msg.sql}\n\`\`\`\n\n`;
 
                 const isLastMsg = (idx === chatHistory.value.length - 1);
                 if (!msg.isFinal && isLastMsg) {
-                    markdown += `_（此消息可能未完成或被中断）_\n\n`;
+                    markdown += `_${t('aiExport.incomplete')}_\n\n`;
                 }
             } else if (msg.role === 'tool_log') {
-                markdown += `> 🛠️ **工具调用**: \`${msg.tool}\` (${msg.done ? '已完成' : '执行中'})\n`;
+                markdown += `> 🛠️ **${t('aiExport.toolCall')}**: \`${msg.tool}\` (${msg.done ? t('ai.toolDone') : t('ai.toolRunning')})\n`;
                 if (msg.args) {
-                    markdown += `> * **请求参数**:\n>   \`\`\`json\n>   ${JSON.stringify(msg.args, null, 2).split('\n').join('\n>   ')}\n>   \`\`\`\n`;
+                    markdown += `> * **${t('aiExport.args')}**:\n>   \`\`\`json\n>   ${JSON.stringify(msg.args, null, 2).split('\n').join('\n>   ')}\n>   \`\`\`\n`;
                 }
                 if (msg.result) {
-                    markdown += `> * **返回结果**:\n>   \`\`\`json\n>   ${JSON.stringify(msg.result, null, 2).split('\n').join('\n>   ')}\n>   \`\`\`\n`;
+                    markdown += `> * **${t('aiExport.result')}**:\n>   \`\`\`json\n>   ${JSON.stringify(msg.result, null, 2).split('\n').join('\n>   ')}\n>   \`\`\`\n`;
                 }
                 markdown += `\n`;
             }
@@ -203,13 +210,13 @@ export function useAiChat({ dbService, getCurrentSource, queryResult, notify, sh
             try {
                 const res = await window.pywebview.api.save_markdown(filename, markdown);
                 if (res?.success) {
-                    notify('聊天记录已导出', 'success');
+                    notify(t('ai.exported'), 'success');
                 } else if (!res?.cancelled) {
-                    showMessage('导出失败: ' + (res?.error || '未知错误'), '错误', 'error');
+                    showMessage(t('settings.exportFailed', { error: res?.error || t('common.unknownError') }), t('common.error'), 'error');
                 }
                 return;
             } catch (e) {
-                showMessage('导出失败: ' + e.message, '错误', 'error');
+                showMessage(t('settings.exportFailed', { error: e.message }), t('common.error'), 'error');
                 return;
             }
         }
@@ -226,11 +233,11 @@ export function useAiChat({ dbService, getCurrentSource, queryResult, notify, sh
                 const writable = await handle.createWritable();
                 await writable.write(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }));
                 await writable.close();
-                notify('聊天记录已导出', 'success');
+                notify(t('ai.exported'), 'success');
                 return;
             } catch (e) {
                 if (e.name === 'AbortError') return;
-                showMessage('导出失败: ' + e.message, '错误', 'error');
+                showMessage(t('settings.exportFailed', { error: e.message }), t('common.error'), 'error');
                 return;
             }
         }
@@ -244,7 +251,7 @@ export function useAiChat({ dbService, getCurrentSource, queryResult, notify, sh
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        notify('聊天记录已导出', 'success');
+        notify(t('ai.exported'), 'success');
     };
 
     const stopGeneration = () => {
@@ -261,13 +268,13 @@ export function useAiChat({ dbService, getCurrentSource, queryResult, notify, sh
     };
 
     const clearChat = async () => {
-        if (await showConfirm('确定要清空对话历史吗？')) {
+        if (await showConfirm(t('ai.newChatConfirm'))) {
             try {
                 await dbService.clearChat(aiSessionId);
-                chatHistory.value = [{ role: 'ai', content: '对话已清空，请开始新的对话。' }];
-                notify('对话已清空', 'success');
+                chatHistory.value = [localMessage('ai.cleared')];
+                notify(t('ai.clearedToast'), 'success');
             } catch (e) {
-                showMessage('清空失败: ' + e.message, '错误', 'error');
+                showMessage(t('history.clearFailed', { error: e.message }), t('common.error'), 'error');
             }
         }
     };

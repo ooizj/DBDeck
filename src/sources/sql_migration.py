@@ -5,6 +5,7 @@ import logging
 from typing import Any, Dict
 
 from sqlalchemy import text
+from src.common.i18n import msg
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +56,11 @@ def migrate_table(src: Any, dest: Any, table_name: str) -> Dict[str, Any]:
     """Migrate one table between SQL-family clients that expose SQLAlchemy engines."""
     try:
         if not supports_sql_migration(src) or not supports_sql_migration(dest):
-            return {"success": False, "error": "源和目标都必须是 SQL-family 数据源"}
+            return {"success": False, "error": msg("源和目标都必须是 SQL 类数据源", "Both source and target must be SQL data sources")}
 
         create_sql = _table_ddl(src, table_name)
         if not create_sql:
-            return {"success": False, "error": f"无法获取源表 {table_name} 的 DDL"}
+            return {"success": False, "error": msg(f"无法获取源表 {table_name} 的 DDL", f"Could not get the DDL of source table {table_name}")}
 
         with dest.engine.connect() as dest_conn:
             dest_conn.execute(text(_ensure_create_if_not_exists(create_sql, table_name)))

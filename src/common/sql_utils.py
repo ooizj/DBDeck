@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime
 import decimal
+import math
 from typing import Any
 
 import sqlglot
@@ -18,17 +19,76 @@ try:
 except ImportError:
     Decimal128 = None
 
+try:
+    from bson import Binary, DBRef, MaxKey, MinKey, Regex, Timestamp
+    from bson.binary import UUID_SUBTYPE
+except ImportError:
+    Binary = DBRef = MaxKey = MinKey = Regex = Timestamp = None
+    UUID_SUBTYPE = 4
+
+
+def _format_timedelta(td: datetime.timedelta) -> str:
+    total_us = td.days * 86_400_000_000 + td.seconds * 1_000_000 + td.microseconds
+    sign = "-" if total_us < 0 else ""
+    total_us = abs(total_us)
+    seconds, micro = divmod(total_us, 1_000_000)
+    hours, rem = divmod(seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+    text = f"{sign}{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{text}.{micro:06d}" if micro else text
+
+
+def _regex_flags(flags: int) -> str:
+    import re
+
+    mapping = ((re.IGNORECASE, "i"), (re.MULTILINE, "m"), (re.DOTALL, "s"), (re.VERBOSE, "x"))
+    return "".join(letter for flag, letter in mapping if flags & flag)
+
 
 def serialize_value(v: Any) -> Any:
     """把行内单个值序列化成 JSON 可写出的形式。"""
     if isinstance(v, (datetime.datetime, datetime.date)):
         return v.isoformat()
+    if isinstance(v, datetime.timedelta):
+        # MySQL TIME 由 pymysql 返回为 timedelta，按 [-]HH:MM:SS[.ffffff] 展示（小时可超过 24）
+        return _format_timedelta(v)
+    if isinstance(v, float) and not math.isfinite(v):
+        # NaN / Infinity 不是合法 JSON，会让整个响应 500
+        return "NaN" if math.isnan(v) else ("Infinity" if v > 0 else "-Infinity")
     if isinstance(v, decimal.Decimal):
         return str(v)
     if ObjectId and isinstance(v, ObjectId):
         return str(v)
     if Decimal128 and isinstance(v, Decimal128):
         return str(v)
+    if Binary is not None:
+        # MongoDB 特殊类型：FastAPI 无法编码，会让整个响应 500；按 mongosh 风格展示
+        if isinstance(v, Binary):
+            if v.subtype == UUID_SUBTYPE and len(v) == 16:
+                return str(v.as_uuid())
+            return "0x" + bytes(v).hex()
+        if isinstance(v, Timestamp):
+            return f"Timestamp({{ t: {v.time}, i: {v.inc} }})"
+        if isinstance(v, Regex):
+            return f"/{v.pattern}/{v.flags if isinstance(v.flags, str) else _regex_flags(v.flags)}"
+        if isinstance(v, MinKey):
+            return "MinKey()"
+        if isinstance(v, MaxKey):
+            return "MaxKey()"
+        if isinstance(v, DBRef):
+            return serialize_value(v.as_doc().to_dict())
+    if isinstance(v, memoryview):
+        # psycopg2 把 PostgreSQL bytea 返回为 memoryview，按 0x 十六进制展示
+        return "0x" + v.tobytes().hex()
+    if isinstance(v, (bytes, bytearray)):
+        # 可读的 UTF-8 文本照常显示；无法解码或含控制字符的二进制转 0x 十六进制
+        try:
+            decoded = bytes(v).decode("utf-8")
+        except UnicodeDecodeError:
+            return "0x" + bytes(v).hex()
+        if any(ord(ch) < 32 and ch not in "\t\n\r" or ord(ch) == 127 for ch in decoded):
+            return "0x" + bytes(v).hex()
+        return decoded
     if isinstance(v, dict):
         return {k: serialize_value(val) for k, val in v.items()}
     if isinstance(v, (list, tuple, set)):

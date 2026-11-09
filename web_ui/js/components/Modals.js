@@ -15,7 +15,7 @@ export default {
         'showAddModal', 'isEditing', 'newSource', 'isTesting', 'isLoading', 'groupNames',
         'showMigrateModal', 'migrateSourceId', 'migrateDestId', 'migrateTables', 'selectedMigrateTables', 'sources', 'migrateTablesLoading', 'migrateTablesError',
         'showDDLModal', 'ddlTable', 'ddlContent',
-        'showConfigModal', 'systemConfig',
+        'showConfigModal', 'systemConfig', 'locale', 'localeMode', 'locales',
         'availableDatabases', 'isDiscovering',
         'showConfirmModal', 'confirmPayload',
         'showSessionModal', 'sessionSourceId', 'sessionSourceName',
@@ -29,7 +29,7 @@ export default {
         'close-migrate', 'migrate-source-change', 'do-migrate',
         'update:migrateDestId', 'update:selectedMigrateTables',
         'close-ddl', 'copy-ddl',
-        'close-config', 'save-config', 'export-config', 'import-config',
+        'close-config', 'save-config', 'change-locale', 'export-config', 'import-config',
         'import-dbeaver-config', 'import-dbeaver-file',
         'confirm-approve', 'confirm-reject',
         'close-session',
@@ -45,7 +45,9 @@ export default {
                 @approve="$emit('confirm-approve')" @reject="$emit('confirm-reject')" />
             <settings-modal v-if="showConfigModal"
                 :show="showConfigModal" :system-config="systemConfig" :is-loading="isLoading"
+                :locale="locale" :locale-mode="localeMode" :locales="locales"
                 @close="$emit('close-config')" @save="$emit('save-config')"
+                @change-locale="(v) => $emit('change-locale', v)"
                 @export-config="$emit('export-config')" @import-config="(d) => $emit('import-config', d)"
                 @import-dbeaver-config="(f) => $emit('import-dbeaver-config', f)"
                 @import-dbeaver-file="$emit('import-dbeaver-file')" />

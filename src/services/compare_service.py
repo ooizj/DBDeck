@@ -15,6 +15,7 @@ from src.common.db_utils import (
     quote_qualified_identifier,
 )
 from src.common.errors import redact_sensitive
+from src.common.i18n import msg
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ def compare_table_structure(source_id: int, table1: str, table2: str) -> dict:
             columns2 = get_table_columns(db, provider, table2)
 
             if not columns1 or not columns2:
-                return {"success": False, "error": "无法获取表结构"}
+                return {"success": False, "error": msg("无法获取表结构", "Could not get the table structure")}
 
             cols1_dict = {col['name']: col for col in columns1}
             cols2_dict = {col['name']: col for col in columns2}
@@ -106,7 +107,7 @@ def compare_table_data(source_id: int, table1: str, table2: str, key_column: str
             result2 = db.execute(query2)
 
             if not result1 or not result2:
-                return {"success": False, "error": "无法获取表数据"}
+                return {"success": False, "error": msg("无法获取表数据", "Could not get the table data")}
 
             columns1 = result1.get('columns', [])
             columns2 = result2.get('columns', [])
@@ -120,7 +121,7 @@ def compare_table_data(source_id: int, table1: str, table2: str, key_column: str
             key_idx2 = columns2.index(key_column) if key_column in columns2 else -1
 
             if key_idx1 == -1 or key_idx2 == -1:
-                return {"success": False, "error": f"找不到主键列: {key_column}"}
+                return {"success": False, "error": msg(f"找不到主键列: {key_column}", f"Primary key column not found: {key_column}")}
 
             for row in rows1:
                 key = row[key_idx1]
@@ -195,7 +196,7 @@ def compare_cross_database(source_id1: int, table1: str, source_id2: int, table2
                 columns2 = get_table_columns(db2, provider2, table2)
 
                 if not columns1 or not columns2:
-                    return {"success": False, "error": "无法获取表结构"}
+                    return {"success": False, "error": msg("无法获取表结构", "Could not get the table structure")}
 
                 cols1_dict = {col['name']: col for col in columns1}
                 cols2_dict = {col['name']: col for col in columns2}

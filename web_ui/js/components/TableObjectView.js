@@ -1,7 +1,9 @@
+import { t } from '../i18n/index.js';
 import ResultArea from './ResultArea.js';
+import { quoteTableName } from '../utils/sqlHelpers.js';
 
 const quoteIdent = (dbType, name) => {
-    if (dbType === 'postgresql') return `"${String(name).replace(/"/g, '""')}"`;
+    if (dbType === 'postgresql') return quoteTableName(name, 'postgresql');
     if (dbType === 'mysql' || dbType === 'sqlite') return `\`${String(name).replace(/`/g, '``')}\``;
     return name;
 };
@@ -141,7 +143,7 @@ export default {
                 table: this.table.name,
                 primaryKey: this.pkColumns,
                 columns: this.columns,
-                reason: this.pkColumns.length ? '' : '表没有主键，结果集只读',
+                reason: this.pkColumns.length ? '' : 'edit.reasonNoPrimaryKey',
             };
         },
         async loadPrimaryKey() {
@@ -163,9 +165,9 @@ export default {
             try {
                 const res = await this.dbService.getDDL(this.table.name, this.source.id);
                 if (res.success) this.ddl = res.ddl || '';
-                else this.ddlError = res.error || '获取 DDL 失败';
+                else this.ddlError = res.error || t('object.ddlFailed');
             } catch (e) {
-                this.ddlError = e.message || '获取 DDL 失败';
+                this.ddlError = e.message || t('object.ddlFailed');
             } finally {
                 this.ddlLoading = false;
             }
@@ -270,27 +272,27 @@ export default {
                     <small v-if="table.comment">{{ table.comment }}</small>
                 </div>
                 <div class="table-object-meta">
-                    <span>{{ columns.length }} 列</span>
-                    <span v-if="pkColumns.length">主键：{{ pkColumns.join(', ') }}</span>
+                    <span>{{ $t('tree.columnCount', { count: columns.length }) }}</span>
+                    <span v-if="pkColumns.length">{{ $t('object.primaryKeyList', { columns: pkColumns.join(', ') }) }}</span>
                     <span>{{ source.name }} / {{ source.database }}</span>
                 </div>
             </div>
 
             <div class="object-tabs">
-                <button :class="{ active: activePane === 'info' }" @click="activePane = 'info'">表信息</button>
-                <button :class="{ active: activePane === 'data' }" @click="activePane = 'data'">数据</button>
+                <button :class="{ active: activePane === 'info' }" @click="activePane = 'info'">{{ $t('object.infoTab') }}</button>
+                <button :class="{ active: activePane === 'data' }" @click="activePane = 'data'">{{ $t('object.dataTab') }}</button>
             </div>
 
             <div v-if="activePane === 'info'" class="object-pane info-pane">
                 <div class="table-info-grid">
                     <section>
                         <div class="section-head">
-                            <div class="section-title">字段</div>
-                            <button class="section-action" @click="refreshInfo" title="重新读取主键和 DDL">刷新</button>
+                            <div class="section-title">{{ $t('object.columns') }}</div>
+                            <button class="section-action" @click="refreshInfo" :title="$t('object.refreshTitle')">{{ $t('common.refresh') }}</button>
                         </div>
                         <table class="object-meta-table">
                             <thead>
-                                <tr><th class="col-index">#</th><th>字段</th><th>类型</th><th class="col-flag">可空</th><th class="col-flag">主键</th><th>注释</th></tr>
+                                <tr><th class="col-index">#</th><th>{{ $t('object.colName') }}</th><th>{{ $t('object.colType') }}</th><th class="col-flag">{{ $t('object.colNullable') }}</th><th class="col-flag">{{ $t('object.colPrimaryKey') }}</th><th>{{ $t('object.colComment') }}</th></tr>
                             </thead>
                             <tbody>
                                 <tr v-for="(col, index) in columns" :key="col.name">
@@ -307,11 +309,11 @@ export default {
                     <section>
                         <div class="section-head">
                             <div class="section-title">DDL</div>
-                            <button class="section-action" :disabled="!ddlText" @click="copyDdl">复制</button>
+                            <button class="section-action" :disabled="!ddlText" @click="copyDdl">{{ $t('common.copy') }}</button>
                         </div>
-                        <pre v-if="ddlLoading" class="object-ddl muted">加载中…</pre>
+                        <pre v-if="ddlLoading" class="object-ddl muted">{{ $t('common.loading') }}</pre>
                         <pre v-else-if="ddlError" class="object-ddl error">{{ ddlError }}</pre>
-                        <pre v-else-if="!ddlText" class="object-ddl muted">暂无 DDL</pre>
+                        <pre v-else-if="!ddlText" class="object-ddl muted">{{ $t('object.noDdl') }}</pre>
                         <pre v-else-if="ddlHtml" class="object-ddl" v-html="ddlHtml"></pre>
                         <pre v-else class="object-ddl">{{ ddlText }}</pre>
                     </section>

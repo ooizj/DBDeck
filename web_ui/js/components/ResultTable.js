@@ -230,7 +230,7 @@ export default {
                             'dragging-th': draggedColumnIdx === idx,
                             'th-sorted': sortColumn === col
                         }"
-                        :title="columnMetadata[col] ? 'Type: ' + columnMetadata[col].type + '\\nComment: ' + columnMetadata[col].comment : ''">
+                        :title="columnMetadata[col] ? $t('result.columnTooltip', { type: columnMetadata[col].type, comment: columnMetadata[col].comment || '' }) : ''">
                         <div class="th-content">
                             <span>{{ col }}</span>
                             <span class="sort-arrow" v-if="sortColumn === col">{{ sortDirection === 'asc' ? '▲' : '▼' }}</span>

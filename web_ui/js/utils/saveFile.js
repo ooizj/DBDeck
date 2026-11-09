@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 // 大文件直接展开 String.fromCharCode(...bytes) 会超出调用栈，分块转换
 export function bytesToBase64(bytes) {
     let binary = '';
@@ -25,14 +26,14 @@ export async function saveFile(content, filename, fileTypes) {
         try {
             const res = await window.pywebview.api.save_file(filename, content, fileTypes || '');
             if (res?.success) {
-                ElementPlus.ElMessage.success('文件已保存到 ' + res.path);
+                ElementPlus.ElMessage.success(t('file.savedTo', { path: res.path }));
                 return;
             }
             if (res?.cancelled) return;
-            ElementPlus.ElMessage.error('保存失败: ' + (res?.error || '未知错误'));
+            ElementPlus.ElMessage.error(t('common.saveFailed', { error: res?.error || t('common.unknownError') }));
             return;
         } catch (e) {
-            ElementPlus.ElMessage.error('保存异常: ' + e.message);
+            ElementPlus.ElMessage.error(t('common.saveFailed', { error: e.message }));
             return;
         }
     }
@@ -45,7 +46,7 @@ export async function saveFile(content, filename, fileTypes) {
             const writable = await handle.createWritable();
             await writable.write(new Blob([content], { type: 'text/plain;charset=utf-8' }));
             await writable.close();
-            ElementPlus.ElMessage.success('文件已保存');
+            ElementPlus.ElMessage.success(t('file.saved'));
             return;
         } catch (e) {
             if (e.name === 'AbortError') return;
@@ -62,5 +63,5 @@ export async function saveFile(content, filename, fileTypes) {
     a.click();
     document.body.removeChild(a);
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    ElementPlus.ElMessage.success('文件已开始下载');
+    ElementPlus.ElMessage.success(t('file.downloadStarted'));
 }

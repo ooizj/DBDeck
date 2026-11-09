@@ -1,5 +1,7 @@
 # DBDeck（多数据源桌面版）
 
+**简体中文** | [English](README.en.md)
+
 基于 FastAPI + Vue 3 + pywebview 的桌面数据库工作台，集成 LLM，按“数据源类型”插件化组织。MySQL、PostgreSQL、SQLite、MongoDB 和 Redis 各自提供连接实现、查询语法、提示词、AI 工具集与前端补全规则。
 
 ## 界面预览
@@ -23,6 +25,7 @@
 - **数据库工具**：提供 SQL 表结构比较、查询历史、MySQL / PostgreSQL 会话管理，以及 MySQL / SQLite SQL 备份
 - **桌面工作台**：提供工具栏、数据库导航器、SQL 控制台、结果面板、AI 面板和状态栏
 - **桌面启动**：通过 pywebview 打开本地窗口，后端 FastAPI 自动在本机端口运行
+- **中英双语界面**：在「设置 → 通用 → 界面语言」中选择「跟随系统」、中文或 English；默认跟随操作系统语言（中文系统显示中文，其他语言显示英文），选择会保存到本机配置
 
 ## 架构概念：SourceProvider
 
@@ -54,6 +57,7 @@ src/
 │   └── config_service.py / migration_service.py / data_edit_service.py
 ├── common/
 │   ├── config.py
+│   ├── i18n.py                        # 返回给界面的提示信息语言（msg(中文, English)）
 │   ├── storage.py                     # SQLite (config.db) 存数据源/脚本/系统配置
 │   └── sql_utils.py                   # add_limit_to_select / serialize_row 等
 ├── ai_core/
@@ -91,6 +95,7 @@ web_ui/
 └── js/
     ├── app.js
     ├── api.js
+    ├── i18n/                           # 界面文案：zh.js / en.js 词典 + t() 与语言切换
     ├── state/                          # 前端状态组合函数（通知、AI session 等）
     ├── sources/                        # ★ 前端 provider
     │   ├── base.js / registry.js
@@ -228,10 +233,12 @@ LLM 参数可写入 `.env`，也可通过界面“设置”保存到 `config.db`
 
 - **前端**：原生 ES Modules，无 `npm install`；浏览器依赖（Vue、Element Plus、Monaco、sql-formatter、SheetJS、Chart.js）固定版本并放在 `web_ui/vendor/`，本地加载，离线可用
 - **AI 事件流**：NDJSON，前端处理 `delta` / `tool_start` / `tool_end` / `confirm_required` / `final` / `error` 事件
+- **界面文案与多语言**：界面文字统一放在 `web_ui/js/i18n/zh.js` 和 `en.js`（两份词典 key 必须一致，`tests/js/i18n.test.mjs` 会检查）。模板里用 `$t('key')`，JS 里 `import { t } from './i18n/index.js'` 后用 `t('key', { 参数 })`。后端返回给界面的提示信息用 `src/common/i18n.py` 的 `msg(中文, English)`，语言取自前端请求头 `X-DBDeck-Language`；日志和发给 LLM 的提示词不翻译
 - **修改提示词**：编辑 `src/sources/<type>/prompts/*.md`，重启服务生效
 - **切换数据源**：Agent 检测到 provider 变化会自动 reset 历史（避免 MySQL 上下文跑到 Mongo 对话里）
 - **产品级检查**：执行 `./venv/bin/python scripts/check_product_ready.py`
-- **架构审计**：见 `docs/ARCHITECTURE_AUDIT.md`
+- **前端测试**：`node --test tests/js/*.mjs`（需要能把 `web_ui/js/*.js` 自动识别为 ES Module 的 Node.js，已在 20.19 和 24 上验证；16、22.2 等旧版本会失败）
+- **架构审计**：见 [docs/ARCHITECTURE_AUDIT.zh-CN.md](docs/ARCHITECTURE_AUDIT.zh-CN.md)
 
 ## AI 数据与隐私
 
@@ -239,8 +246,8 @@ LLM 参数可写入 `.env`，也可通过界面“设置”保存到 `config.db`
 
 ## 安全与贡献
 
-- 安全模型和漏洞报告方式见 [SECURITY.md](SECURITY.md)。
-- 开发与贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+- 安全模型和漏洞报告方式见 [SECURITY.zh-CN.md](SECURITY.zh-CN.md)。
+- 开发与贡献流程见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)，行为准则见 [CODE_OF_CONDUCT.zh-CN.md](CODE_OF_CONDUCT.zh-CN.md)。
 - 浏览器端第三方组件见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 许可证

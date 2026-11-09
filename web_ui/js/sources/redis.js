@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 import { buildRedisSetCommand, formatRedisArgument } from '../utils/redisCommands.js';
 
 const redisCommands = [
@@ -24,17 +25,17 @@ export default {
     supportsCopyDDL: false,
 
     connFormFields: [
-        { key: 'host', label: '主机', type: 'text', flex: 2, placeholder: 'localhost' },
-        { key: 'port', label: '端口', type: 'number', flex: 1, placeholder: 6379 },
-        { key: 'user', label: '用户名', type: 'text', flex: 1, placeholder: '可选' },
-        { key: 'password', label: '密码', type: 'password', flex: 1 },
+        { key: 'host', get label() { return t('field.host'); }, type: 'text', flex: 2, placeholder: 'localhost' },
+        { key: 'port', get label() { return t('field.port'); }, type: 'number', flex: 1, placeholder: 6379 },
+        { key: 'user', get label() { return t('field.user'); }, type: 'text', flex: 1, get placeholder() { return t('field.optional'); } },
+        { key: 'password', get label() { return t('field.password'); }, type: 'password', flex: 1 },
         {
             key: 'database',
-            label: '数据库编号',
+            get label() { return t('field.redisDb'); },
             type: 'database-discover',
             flex: 1,
             placeholder: '0',
-            hint: 'Redis DB index，例如 0、1、2。',
+            get hint() { return t('field.redisDbHint'); },
         },
     ],
 
@@ -82,11 +83,8 @@ export default {
 
     copyInsertLabel(table) {
         const type = keyType(table);
-        if (type === 'hash') return '复制 HSET';
-        if (type === 'list') return '复制 RPUSH';
-        if (type === 'set') return '复制 SADD';
-        if (type === 'zset') return '复制 ZADD';
-        return '复制 SET';
+        const commands = { hash: 'HSET', list: 'RPUSH', set: 'SADD', zset: 'ZADD' };
+        return t('provider.copyCommand', { command: commands[type] || 'SET' });
     },
 
     buildInsertQuery(table, currentValue) {

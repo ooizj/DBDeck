@@ -8,7 +8,7 @@ export default {
         title() {
             if (!this.currentSource) return 'Redis';
             if (!this.hasKey) return `${this.currentSource.name} / DB${this.currentSource.database || '0'}`;
-            return this.editor.originalKey || this.editor.key || 'New key';
+            return this.editor.originalKey || this.editor.key || this.$t('redis.newKey');
         },
         isString() {
             return (this.editor?.type || 'string') === 'string';
@@ -44,15 +44,15 @@ export default {
             </div>
 
             <div v-if="!hasKey" class="redis-key-empty">
-                <div class="empty-title">选择左侧 Redis key 查看内容</div>
-                <div class="empty-subtitle">也可以点击左侧 + Key 新建 String key。</div>
+                <div class="empty-title">{{ $t('redis.panelEmptyTitle') }}</div>
+                <div class="empty-subtitle">{{ $t('redis.panelEmptySubtitle') }}</div>
             </div>
 
             <div v-else class="redis-key-editor">
                 <div class="redis-key-header">
                     <div class="redis-field-group redis-type-field">
                         <label>Type</label>
-                        <el-select no-data-text="无数据" no-match-text="无匹配数据" v-model="editor.type" :disabled="editor.mode !== 'new'" size="small" style="width: 100%;">
+                        <el-select v-model="editor.type" :disabled="editor.mode !== 'new'" size="small" style="width: 100%;">
                             <el-option value="string" label="String" />
                             <el-option value="hash" label="Hash" />
                             <el-option value="list" label="List" />
@@ -69,20 +69,19 @@ export default {
                         <label>TTL</label>
                         <el-input-number v-model="editor.ttl" :min="-1" :step="1" placeholder="-1" size="small" controls-position="right" style="width: 100%;" />
                     </div>
-                    <el-button size="small" type="danger" plain @click="$emit('delete-key')" :disabled="editor.mode === 'new' || editor.loading || editor.saving" title="删除 Key">⌫</el-button>
-                    <el-button size="small" @click="$emit('refresh')" :disabled="editor.loading || editor.saving || editor.mode === 'new'" title="刷新">↻</el-button>
-                    <el-button size="small" title="以文本编辑">‹/›</el-button>
+                    <el-button size="small" type="danger" plain @click="$emit('delete-key')" :disabled="editor.mode === 'new' || editor.loading || editor.saving" :title="$t('redis.deleteKey')">⌫</el-button>
+                    <el-button size="small" @click="$emit('refresh')" :disabled="editor.loading || editor.saving || editor.mode === 'new'" :title="$t('common.refresh')">↻</el-button>
                 </div>
 
                 <div v-if="editor.error" class="redis-editor-error">{{ editor.error }}</div>
 
                 <div class="redis-value-toolbar">
-                    <el-select no-data-text="无数据" no-match-text="无匹配数据" v-model="editor.format" size="small" style="width: 110px;">
+                    <el-select v-model="editor.format" size="small" style="width: 110px;">
                         <el-option value="text" label="Text" />
                         <el-option value="json" label="JSON" />
                     </el-select>
                     <span>Size: {{ valueSize }}</span>
-                    <el-button text size="small" @click="$emit('copy', editor.value)">复制</el-button>
+                    <el-button text size="small" @click="$emit('copy', editor.value)">{{ $t('common.copy') }}</el-button>
                 </div>
 
                 <el-input
@@ -96,11 +95,11 @@ export default {
                 />
 
                 <div class="redis-key-footer">
-                    <span v-if="editor.loading">加载中...</span>
-                    <span v-else-if="editor.saving">保存中...</span>
-                    <span v-else-if="editor.mode === 'new'">新建 String key</span>
+                    <span v-if="editor.loading">{{ $t('common.loading') }}</span>
+                    <span v-else-if="editor.saving">{{ $t('common.saving') }}</span>
+                    <span v-else-if="editor.mode === 'new'">{{ $t('redis.newStringKey') }}</span>
                     <span v-else>DB{{ currentSource?.database || '0' }}</span>
-                    <el-button type="primary" size="small" @click="$emit('save')" :disabled="!isEditableType || editor.loading || editor.saving">保存</el-button>
+                    <el-button type="primary" size="small" @click="$emit('save')" :disabled="!isEditableType || editor.loading || editor.saving">{{ $t('common.save') }}</el-button>
                 </div>
             </div>
         </div>

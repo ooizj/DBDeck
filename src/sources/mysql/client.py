@@ -6,6 +6,8 @@ import time
 import warnings
 from typing import Any, Dict, List, Optional
 
+import pymysql.constants
+import pymysql.converters
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import SAWarning, SQLAlchemyError
@@ -14,12 +16,19 @@ from src.common.config import config
 from src.common.sql_utils import serialize_row, split_sql_by_tokens
 from src.sources.base import DataSourceClient
 from src.sources.ssh_tunnel import clean_str, close_ssh_tunnel, open_ssh_tunnel
+from src.common.i18n import msg
 
 warnings.filterwarnings(
     "ignore", category=SAWarning, message=".*Did not recognize type.*"
 )
 
 logger = logging.getLogger(__name__)
+
+CONNECT_TIMEOUT_SECONDS = 10
+
+# pymysql 默认把 BIT 返回为原始 bytes（BIT(1) 会显示成不可见字符），这里转成整数
+_MYSQL_CONVERSIONS = dict(pymysql.converters.conversions)
+_MYSQL_CONVERSIONS[pymysql.constants.FIELD_TYPE.BIT] = lambda value: int.from_bytes(value, "big")
 
 
 class MySQLClient(DataSourceClient):
@@ -39,7 +48,14 @@ class MySQLClient(DataSourceClient):
                 port=port,
                 database=clean_str(config_dict.get("database")),
             )
-            self.engine = create_engine(url)
+            # 未设置时驱动会无限期等待握手，代理/网络异常下会卡死整个请求
+            self.engine = create_engine(
+                url,
+                connect_args={
+                    "connect_timeout": CONNECT_TIMEOUT_SECONDS,
+                    "conv": _MYSQL_CONVERSIONS,
+                },
+            )
         else:
             self.engine = create_engine(config.sqlalchemy_url)
 
@@ -237,7 +253,7 @@ class MySQLClient(DataSourceClient):
     def get_schema(self, database: Optional[str] = None) -> Dict[str, Any]:
         database = database or self.engine.url.database
         if not database:
-            raise ValueError("MySQL 数据库名称不能为空，请先选择或填写数据库名称")
+            raise ValueError(msg("MySQL 数据库名称不能为空，请先选择或填写数据库名称", "The MySQL database name is empty; select or enter a database name"))
         # 一次查询拿到所有表/视图的字段，避免逐表 SHOW CREATE TABLE 在大库上很慢
         with self.engine.connect() as conn:
             rows = conn.execute(text("""

@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 from src.common.db_utils import managed_source
 from src.common.errors import redact_sensitive
 from src.common.sql_utils import split_sql_by_tokens
+from src.common.i18n import msg
 
 _DIALECTS = {"mysql": "mysql", "postgresql": "postgres", "sqlite": "sqlite"}
 
@@ -41,18 +42,18 @@ def single_statement(query: str, dialect: str) -> str:
     statements = [s.strip().rstrip(";").strip() for s in split_sql_by_tokens(query or "", dialect=dialect)]
     statements = [s for s in statements if s]
     if not statements:
-        raise ExplainError("没有可分析的 SQL")
+        raise ExplainError(msg("没有可分析的 SQL", "There is no SQL to analyze"))
     if len(statements) > 1:
-        raise ExplainError("执行计划一次只能分析一条语句，请选中要分析的语句")
+        raise ExplainError(msg("执行计划一次只能分析一条语句，请选中要分析的语句", "Only one statement can be analyzed at a time; select the statement to analyze"))
     return statements[0]
 
 
 def _execute(db, sql: str) -> Dict[str, Any]:
     result = db.execute(sql)
     if not isinstance(result, dict):
-        raise ExplainError("数据库没有返回执行计划")
+        raise ExplainError(msg("数据库没有返回执行计划", "The database returned no execution plan"))
     if result.get("success") is False:
-        raise ExplainError(result.get("error_msg") or result.get("error") or "获取执行计划失败")
+        raise ExplainError(result.get("error_msg") or result.get("error") or msg("获取执行计划失败", "Failed to get the execution plan"))
     return result
 
 
@@ -62,7 +63,7 @@ def visualize_execution_plan(source_id: int, query: str) -> dict:
         with managed_source(source_id) as (provider, db):
             dialect = _DIALECTS.get(provider.id)
             if dialect is None:
-                return {"success": False, "error": f"{provider.display_name} 不支持执行计划"}
+                return {"success": False, "error": msg(f"{provider.display_name} 不支持执行计划", f"{provider.display_name} does not support execution plans")}
             statement = single_statement(query, dialect)
             if provider.id == "mysql":
                 plan = _mysql_plan(db, statement)
@@ -101,11 +102,11 @@ def _postgresql_plan(db, statement: str) -> Dict[str, Any]:
     result = _execute(db, f"EXPLAIN (FORMAT JSON) {statement}")
     data = result.get("data") or []
     if not data or not data[0]:
-        raise ExplainError("数据库没有返回执行计划")
+        raise ExplainError(msg("数据库没有返回执行计划", "The database returned no execution plan"))
     raw = _maybe_json(data[0][0])
     document = raw[0] if isinstance(raw, list) and raw else raw
     if not isinstance(document, dict) or not isinstance(document.get("Plan"), dict):
-        raise ExplainError("无法解析 PostgreSQL 执行计划")
+        raise ExplainError(msg("无法解析 PostgreSQL 执行计划", "Could not parse the PostgreSQL execution plan"))
     tree = convert_pg_plan(document["Plan"])
     return {
         "tree": tree,
@@ -120,7 +121,7 @@ def convert_pg_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     label = str(plan.get("Node Type") or "Unknown")
     detail_parts = []
     if plan.get("Index Name"):
-        detail_parts.append(f"索引 {plan['Index Name']}")
+        detail_parts.append(msg(f"索引 {plan['Index Name']}", f"index {plan['Index Name']}"))
     if plan.get("Relation Name"):
         relation = plan["Relation Name"]
         if plan.get("Schema"):
@@ -130,11 +131,15 @@ def convert_pg_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
         detail_parts.append(relation)
     metrics = []
     if plan.get("Startup Cost") is not None or plan.get("Total Cost") is not None:
-        metrics.append({"key": "成本", "value": f"{plan.get('Startup Cost', 0)}..{plan.get('Total Cost', 0)}"})
+        metrics.append({
+            "id": "cost",
+            "key": msg("成本", "Cost"),
+            "value": f"{plan.get('Startup Cost', 0)}..{plan.get('Total Cost', 0)}",
+        })
     if plan.get("Plan Rows") is not None:
-        metrics.append({"key": "估算行数", "value": plan["Plan Rows"]})
+        metrics.append({"id": "rows", "key": msg("估算行数", "Estimated rows"), "value": plan["Plan Rows"]})
     if plan.get("Plan Width") is not None:
-        metrics.append({"key": "行宽", "value": plan["Plan Width"]})
+        metrics.append({"id": "width", "key": msg("行宽", "Row width"), "value": plan["Plan Width"]})
     for key, value in plan.items():
         if key in _PG_SUMMARY_KEYS or isinstance(value, (dict, list)) or value is None:
             continue
@@ -183,16 +188,16 @@ def _maybe_json(value: Any) -> Any:
 
 
 def _flatten_tree(tree: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    columns = ["节点", "对象", "成本", "估算行数"]
+    columns = [msg("节点", "Node"), msg("对象", "Object"), msg("成本", "Cost"), msg("估算行数", "Estimated rows")]
     rows: List[List[Any]] = []
 
     def walk(node: Dict[str, Any], depth: int) -> None:
-        metrics = {m["key"]: m["value"] for m in node.get("metrics", [])}
+        metrics = {m["id"]: m["value"] for m in node.get("metrics", []) if m.get("id")}
         rows.append([
             "    " * depth + node["label"],
             node.get("detail", ""),
-            metrics.get("成本", ""),
-            metrics.get("估算行数", ""),
+            metrics.get("cost", ""),
+            metrics.get("rows", ""),
         ])
         for child in node.get("children", []):
             walk(child, depth + 1)

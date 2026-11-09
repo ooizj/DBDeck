@@ -1,8 +1,9 @@
 import ResultTable from './ResultTable.js?v=result-table-20261016';
 import { buildMongoInsertOneCommand } from '../utils/mongoCommands.js';
 import { buildRedisSetCommand, formatRedisArgument } from '../utils/redisCommands.js';
-import { formatSqlLiteral } from '../utils/sqlHelpers.js';
+import { formatSqlLiteral, quoteTableName } from '../utils/sqlHelpers.js';
 import { bytesToBase64, saveFile, timestampedFilename } from '../utils/saveFile.js';
+import { t } from '../i18n/index.js';
 
 export { bytesToBase64 };
 
@@ -101,8 +102,8 @@ export default {
         },
         rowCopyLabel() {
             const providerId = this.queryResult?.providerId || this.queryResult?.provider_id;
-            if (providerId === 'mongodb') return '复制 insertOne';
-            return providerId === 'redis' ? '复制 SET 命令' : '复制 INSERT';
+            if (providerId === 'mongodb') return t('provider.copyCommand', { command: 'insertOne' });
+            return providerId === 'redis' ? t('provider.copyCommand', { command: 'SET' }) : t('provider.copyInsert');
         },
         supportsSqlInsertExport() {
             const providerId = this.queryResult?.providerId || this.queryResult?.provider_id;
@@ -199,9 +200,9 @@ export default {
             return value.toFixed(value >= 10 ? 1 : 2) + 'ms';
         },
         statementKindLabel(stmt) {
-            if (stmt?.columns?.length) return 'Result';
+            if (stmt?.columns?.length) return t('result.kindResult');
             if (stmt?.affected_rows !== null && stmt?.affected_rows !== undefined) return 'OK';
-            return stmt?.operation_kind || 'Statement';
+            return stmt?.operation_kind || t('result.kindStatement');
         },
         getCellValue(row, col, idx) {
             return Array.isArray(row) ? row[idx] : row[col];
@@ -315,6 +316,9 @@ export default {
             const quote = providerId === 'mysql' ? '`' : '"';
             return quote + String(name).split(quote).join(quote + quote) + quote;
         },
+        sqlTableIdentifier(name) {
+            return quoteTableName(name, this.queryResult?.providerId || this.queryResult?.provider_id);
+        },
         sqlLiteral(value) {
             return formatSqlLiteral(value, this.queryResult?.providerId || this.queryResult?.provider_id);
         },
@@ -410,7 +414,7 @@ export default {
             if (providerId === 'redis') {
                 if (!Object.prototype.hasOwnProperty.call(data, 'key')
                     || !Object.prototype.hasOwnProperty.call(data, 'value')) {
-                    ElementPlus.ElMessage.warning('当前 Redis 结果无法生成 SET 命令');
+                    ElementPlus.ElMessage.warning(t('result.redisSetUnavailable'));
                     return;
                 }
                 const command = buildRedisSetCommand(data.key, data.value);
@@ -420,16 +424,16 @@ export default {
             }
             const columns = Object.keys(data);
             if (!columns.length) {
-                ElementPlus.ElMessage.warning('这一行没有可插入的列');
+                ElementPlus.ElMessage.warning(t('result.rowNoColumns'));
                 return;
             }
-            const sql = `INSERT INTO ${this.sqlIdentifier(this.currentTableName())} (${columns.map(col => this.sqlIdentifier(col)).join(', ')}) VALUES (${columns.map(col => this.sqlLiteral(data[col])).join(', ')});`;
+            const sql = `INSERT INTO ${this.sqlTableIdentifier(this.currentTableName())} (${columns.map(col => this.sqlIdentifier(col)).join(', ')}) VALUES (${columns.map(col => this.sqlLiteral(data[col])).join(', ')});`;
             this.$emit('copy', sql);
             this.closeRowContextMenu();
         },
         async createRowFromContext({ duplicate = false } = {}) {
             if (!this.editableInfo.enabled) {
-                ElementPlus.ElMessage.warning(this.editableInfo.reason || '当前结果只读');
+                ElementPlus.ElMessage.warning(t(this.editableInfo.reason || 'result.readOnlyResult'));
                 return;
             }
             const anchorRow = this.rowContextMenu.row;
@@ -438,22 +442,22 @@ export default {
                 ? this.rowToSourceData(anchorRow, { includeGenerated: false })
                 : this.rowToSourceData(anchorRow, { includeGenerated: false, useDefaults: true });
             if (!Object.keys(data).length) {
-                ElementPlus.ElMessage.warning('当前结果没有可插入的列');
+                ElementPlus.ElMessage.warning(t('result.resultNoColumns'));
                 return;
             }
             this.insertDisplayRowAfter(anchorRow, this.makePendingRow(data, anchorRow, duplicate ? 'duplicate' : 'new'));
-            ElementPlus.ElMessage.info(duplicate ? '已在本地复制出新行，右键选择「保存新行」写入数据库' : '已在本地添加新行，编辑后右键选择「保存新行」写入数据库');
+            ElementPlus.ElMessage.info(duplicate ? t('result.rowDuplicatedLocally') : t('result.rowAddedLocally'));
             this.closeRowContextMenu();
         },
         async savePendingRow(row = this.rowContextMenu.row) {
             if (!this.editableInfo.enabled) {
-                ElementPlus.ElMessage.warning(this.editableInfo.reason || '当前结果只读');
+                ElementPlus.ElMessage.warning(t(this.editableInfo.reason || 'result.readOnlyResult'));
                 return;
             }
             if (!this.isPendingRow(row)) return;
             const data = this.rowToSourceData(row, { includeGenerated: false });
             if (!Object.keys(data).length) {
-                ElementPlus.ElMessage.warning('这一行没有可插入的列');
+                ElementPlus.ElMessage.warning(t('result.rowNoColumns'));
                 return;
             }
             try {
@@ -465,19 +469,19 @@ export default {
                 );
                 if (result?.success) {
                     row.__pendingInsert = false;
-                    ElementPlus.ElMessage.success('已保存');
+                    ElementPlus.ElMessage.success(t('common.saved'));
                     this.closeRowContextMenu();
                     this.$emit('refresh');
                 } else {
-                    ElementPlus.ElMessage.error(result?.error || '插入失败');
+                    ElementPlus.ElMessage.error(result?.error || t('result.insertFailed'));
                 }
             } catch (e) {
-                ElementPlus.ElMessage.error(e.message || '插入失败');
+                ElementPlus.ElMessage.error(e.message || t('result.insertFailed'));
             }
         },
         async setContextCellNull() {
             if (!this.editableInfo.enabled) {
-                ElementPlus.ElMessage.warning(this.editableInfo.reason || '当前结果只读');
+                ElementPlus.ElMessage.warning(t(this.editableInfo.reason || 'result.readOnlyResult'));
                 return;
             }
             const row = this.rowContextMenu.row;
@@ -485,13 +489,13 @@ export default {
             if (!row || !column) return;
             if (this.isPendingRow(row)) {
                 this.setRowValue(row, column, null);
-                ElementPlus.ElMessage.info('已在本地设为 NULL，右键「保存新行」后写入数据库');
+                ElementPlus.ElMessage.info(t('result.nullLocally'));
                 this.closeRowContextMenu();
                 return;
             }
             const where = this.buildEditWhere(row);
             if (!where) {
-                ElementPlus.ElMessage.warning('缺少主键，无法更新');
+                ElementPlus.ElMessage.warning(t('result.noKeyUpdate'));
                 return;
             }
             try {
@@ -505,40 +509,40 @@ export default {
                 );
                 if (result?.success) {
                     this.setRowValue(row, column, null);
-                    ElementPlus.ElMessage.success('已设为 NULL');
+                    ElementPlus.ElMessage.success(t('result.setNullDone'));
                     this.closeRowContextMenu();
                 } else {
-                    ElementPlus.ElMessage.error(result?.error || '更新失败');
+                    ElementPlus.ElMessage.error(result?.error || t('result.updateFailed'));
                 }
             } catch (e) {
-                ElementPlus.ElMessage.error(e.message || '更新失败');
+                ElementPlus.ElMessage.error(e.message || t('result.updateFailed'));
             }
         },
         async deleteContextRow() {
             if (!this.editableInfo.enabled) {
-                ElementPlus.ElMessage.warning(this.editableInfo.reason || '当前结果只读');
+                ElementPlus.ElMessage.warning(t(this.editableInfo.reason || 'result.readOnlyResult'));
                 return;
             }
             const row = this.rowContextMenu.row;
             if (!row) return;
             if (this.isPendingRow(row)) {
                 this.removeDisplayRow(row);
-                ElementPlus.ElMessage.success('已移除未保存的新行');
+                ElementPlus.ElMessage.success(t('result.pendingRemoved'));
                 this.closeRowContextMenu();
                 return;
             }
             const where = this.buildEditWhere(row);
             if (!where) {
-                ElementPlus.ElMessage.warning('缺少主键，无法删除');
+                ElementPlus.ElMessage.warning(t('result.noKeyDelete'));
                 return;
             }
             const condition = Object.entries(where).map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join(' AND ');
             this.closeRowContextMenu();
             try {
                 await ElementPlus.ElMessageBox.confirm(
-                    `将从表「${this.editableInfo.table}」中删除满足 ${condition} 的行，此操作不可撤销。`,
-                    '确认删除',
-                    { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' }
+                    t('result.deleteConfirm', { table: this.editableInfo.table, condition }),
+                    t('result.deleteConfirmTitle'),
+                    { type: 'warning', confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), confirmButtonClass: 'el-button--danger' }
                 );
             } catch (e) {
                 return;
@@ -553,13 +557,13 @@ export default {
                 );
                 if (result?.success) {
                     this.removeDisplayRow(row);
-                    ElementPlus.ElMessage.success('已删除');
+                    ElementPlus.ElMessage.success(t('common.deleted'));
                     this.closeRowContextMenu();
                 } else {
-                    ElementPlus.ElMessage.error(result?.error || '删除失败');
+                    ElementPlus.ElMessage.error(result?.error || t('result.deleteFailed'));
                 }
             } catch (e) {
-                ElementPlus.ElMessage.error(e.message || '删除失败');
+                ElementPlus.ElMessage.error(e.message || t('result.deleteFailed'));
             }
         },
         parseEditedValue(original, text) {
@@ -581,12 +585,12 @@ export default {
             if (Object.is(value, originalValue)) return;
             if (this.isPendingRow(row)) {
                 this.setRowValue(row, column, value);
-                ElementPlus.ElMessage.info('已在本地修改，右键「保存新行」后写入数据库');
+                ElementPlus.ElMessage.info(t('result.editedLocally'));
                 return;
             }
             const where = this.buildEditWhere(row);
             if (!where) {
-                ElementPlus.ElMessage.warning('结果中缺少主键列，无法保存');
+                ElementPlus.ElMessage.warning(t('result.noKeySave'));
                 return;
             }
             const sourceColumn = this.sourceColumnName(column);
@@ -600,12 +604,12 @@ export default {
                 );
                 if (result?.success) {
                     this.setRowValue(row, column, value);
-                    ElementPlus.ElMessage.success('单元格已保存');
+                    ElementPlus.ElMessage.success(t('result.cellSaved'));
                 } else {
-                    ElementPlus.ElMessage.error(result?.error || '保存失败');
+                    ElementPlus.ElMessage.error(result?.error || t('result.saveFailed'));
                 }
             } catch (e) {
-                ElementPlus.ElMessage.error(e.message || '保存失败');
+                ElementPlus.ElMessage.error(e.message || t('result.saveFailed'));
             }
         },
         async saveDetailValue() {
@@ -675,15 +679,15 @@ export default {
             try {
                 const res = await this.dbService.exportQuery(this.exportAll.query, this.exportAll.sourceId);
                 if (!res?.success) {
-                    ElementPlus.ElMessage.error('导出失败: ' + (res?.error || '未知错误'));
+                    ElementPlus.ElMessage.error(t('settings.exportFailed', { error: res?.error || t('common.unknownError') }));
                     return null;
                 }
                 if (res.truncated) {
-                    ElementPlus.ElMessage.warning(`结果超过 ${res.max_rows} 行，只导出前 ${res.max_rows} 行`);
+                    ElementPlus.ElMessage.warning(t('result.exportTruncated', { max: res.max_rows }));
                 }
                 return alignExportColumns(this.displayColumns, res.columns || [], res.data || []);
             } catch (e) {
-                ElementPlus.ElMessage.error('导出失败: ' + (e.message || e));
+                ElementPlus.ElMessage.error(t('settings.exportFailed', { error: e.message || e }));
                 return null;
             } finally {
                 this.exporting = false;
@@ -725,7 +729,7 @@ export default {
         async exportXLSX() {
             this.closeExportMenu();
             if (typeof XLSX === 'undefined') {
-                ElementPlus.ElMessage.error('XLSX 库未加载');
+                ElementPlus.ElMessage.error(t('result.xlsxMissing'));
                 return;
             }
             const exportData = await this.resolveExportData();
@@ -760,7 +764,7 @@ export default {
                     return this.sqlLiteral(val);
                 }).join(', ');
                 const quotedColumns = cols.map(col => this.sqlIdentifier(col)).join(', ');
-                return `INSERT INTO ${this.sqlIdentifier(tableName)} (${quotedColumns}) VALUES (${vals});`;
+                return `INSERT INTO ${this.sqlTableIdentifier(tableName)} (${quotedColumns}) VALUES (${vals});`;
             });
             await this._saveFile(lines.join('\n'), timestampedFilename('query-result', 'sql'), '*.sql|*.txt');
         },
@@ -786,18 +790,18 @@ export default {
         <div class="result-area" @click="closeMenus">
             <div class="result-content">
                 <div v-if="queryResult.isRunning" class="result-info">
-                    <span style="color: #247bbd; font-weight: bold;">查询中...</span>
+                    <span style="color: #247bbd; font-weight: bold;">{{ $t('result.running') }}</span>
                 </div>
                 <template v-else>
                     <div v-if="queryResult.error" class="result-error-panel">
                         <div class="result-error-header">
                             <span class="result-error-icon">!</span>
-                            <span>执行失败</span>
-                            <span v-if="queryResult.errorCode" class="result-error-code">错误 {{ queryResult.errorCode }}</span>
+                            <span>{{ $t('result.failed') }}</span>
+                            <span v-if="queryResult.errorCode" class="result-error-code">{{ $t('result.errorCode', { code: queryResult.errorCode }) }}</span>
                         </div>
                         <div class="result-error-message">{{ queryResult.errorMsg }}</div>
                         <details style="border-top: 1px solid var(--border-slate); padding-top: 8px;">
-                            <summary style="font-size: 12px; color: var(--text-muted); cursor: pointer; outline: none; user-select: none;">查看技术详情</summary>
+                            <summary style="font-size: 12px; color: var(--text-muted); cursor: pointer; outline: none; user-select: none;">{{ $t('result.technicalDetails') }}</summary>
                             <div style="margin-top: 8px; font-family: monospace; font-size: 11px; color: var(--text-secondary); background: var(--surface-bg); padding: 10px; border-radius: 4px; overflow: auto; max-height: 200px;">{{ queryResult.error }}</div>
                         </details>
                     </div>
@@ -808,22 +812,22 @@ export default {
                                     @click="selectStatement(idx)"
                                     :title="stmt.sql || stmt.executed_query">
                                 #{{ idx + 1 }} {{ statementKindLabel(stmt) }}
-                                <span v-if="stmt.row_count !== undefined"> · {{ stmt.row_count }} rows</span>
+                                <span v-if="stmt.row_count !== undefined"> · {{ $t('history.rows', { count: stmt.row_count }) }}</span>
                             </button>
                         </div>
                         <div class="result-info">
-                            <span class="result-status-ok">执行成功</span>
-                            <span>({{ queryResult.time }}s) | 行数/影响: {{ displayRowCount }}</span>
-                            <span v-if="searchText && filteredRows.length !== displayRows.length"> | 筛选: {{ filteredRows.length }}/{{ displayRows.length }}</span>
-                            <span v-if="statements.length > 1"> | {{ statements.length }} statements</span>
-                            <span v-if="formatDuration(activeStatement?.duration_ms)"> | 当前: {{ formatDuration(activeStatement.duration_ms) }}</span>
+                            <span class="result-status-ok">{{ $t('result.succeeded') }}</span>
+                            <span>({{ queryResult.time }}s) | {{ $t('result.rowsAffected', { count: displayRowCount }) }}</span>
+                            <span v-if="searchText && filteredRows.length !== displayRows.length"> | {{ $t('result.filtered', { shown: filteredRows.length, total: displayRows.length }) }}</span>
+                            <span v-if="statements.length > 1"> | {{ $t('result.statementCount', { count: statements.length }) }}</span>
+                            <span v-if="formatDuration(activeStatement?.duration_ms)"> | {{ $t('result.currentDuration', { time: formatDuration(activeStatement.duration_ms) }) }}</span>
                             <span v-if="displaySql" class="result-executed-sql" :title="displaySql"> | SQL: {{ displaySql }}</span>
                         </div>
                         <template v-if="displayColumns.length">
                             <div class="result-toolbar">
-                                <el-input v-model="searchText" placeholder="搜索结果..." :disabled="!displayRows.length" size="small" clearable style="width: 220px;" />
+                                <el-input v-model="searchText" :placeholder="$t('result.searchPlaceholder')" :disabled="!displayRows.length" size="small" clearable style="width: 220px;" />
                                 <div v-if="hasExternalPagination" class="result-pagination inline">
-                                    <span v-if="pagination.loading">统计中...</span>
+                                    <span v-if="pagination.loading">{{ $t('result.counting') }}</span>
                                     <span v-else>{{ pagination.start }}-{{ pagination.end }} / {{ pagination.total }}</span>
                                     <el-button size="small" :disabled="pagination.page <= 1 || pagination.disabled" @click="$emit('page-change', -1)">‹</el-button>
                                     <span>{{ pagination.page }} / {{ pagination.totalPages }}</span>
@@ -835,8 +839,8 @@ export default {
                                     <span>{{ currentPage }} / {{ totalPages }}</span>
                                     <el-button size="small" :disabled="currentPage >= totalPages" @click="goPage(1)">›</el-button>
                                 </div>
-                                <span v-if="editableInfo.enabled" class="result-editable-note" title="双击单元格编辑，回车保存">
-                                    可编辑: {{ editableInfo.table }}
+                                <span v-if="editableInfo.enabled" class="result-editable-note" :title="$t('result.editableTitle')">
+                                    {{ $t('result.editable', { table: editableInfo.table }) }}
                                 </span>
                                 <el-button
                                     v-if="pendingRows.length"
@@ -844,24 +848,24 @@ export default {
                                     type="primary"
                                     plain
                                     @click="savePendingRow(pendingRows[0])">
-                                    Save Pending Row
+                                    {{ $t('result.savePendingRow') }}
                                 </el-button>
-                                <el-tag v-else-if="editableInfo.reason" size="small" type="info" effect="plain" :title="editableInfo.reason">
-                                    只读
+                                <el-tag v-else-if="editableInfo.reason" size="small" type="info" effect="plain" :title="$t(editableInfo.reason)">
+                                    {{ $t('result.readOnly') }}
                                 </el-tag>
-                                <span v-if="sortColumn" class="sort-active-hint" @click="toggleSort(sortColumn)" title="点击清除排序">
-                                    排序: {{ sortColumn }} {{ sortDirection === 'asc' ? '↑' : '↓' }} ✕
+                                <span v-if="sortColumn" class="sort-active-hint" @click="toggleSort(sortColumn)" :title="$t('result.clearSort')">
+                                    {{ $t('result.sortedBy', { column: sortColumn }) }} {{ sortDirection === 'asc' ? '↑' : '↓' }} ✕
                                 </span>
                                 <div class="result-toolbar-spacer"></div>
-                                <el-button size="small" title="刷新" @click="$emit('refresh')">刷新</el-button>
+                                <el-button size="small" :title="$t('result.refreshTitle')" @click="$emit('refresh')">{{ $t('common.refresh') }}</el-button>
                                 <div v-if="displayRows.length > 0" class="result-export-inline">
-                                    <el-button size="small" @click.stop="toggleExportMenu" :loading="exporting">{{ exporting ? '导出中…' : '导出' }}</el-button>
+                                    <el-button size="small" @click.stop="toggleExportMenu" :loading="exporting">{{ exporting ? $t('result.exporting') : $t('common.export') }}</el-button>
                                     <div v-if="showExportMenu" class="export-dropdown" @click.stop>
                                         <div v-if="canExportAll" class="export-scope-switch">
-                                            <button type="button" :class="{ active: exportScope === 'page' }" @click="exportScope = 'page'">当前页 {{ displayRows.length }} 行</button>
-                                            <button type="button" :class="{ active: exportScope === 'all' }" @click="exportScope = 'all'">全部 {{ exportTotal }} 行</button>
+                                            <button type="button" :class="{ active: exportScope === 'page' }" @click="exportScope = 'page'">{{ $t('result.exportPage', { count: displayRows.length }) }}</button>
+                                            <button type="button" :class="{ active: exportScope === 'all' }" @click="exportScope = 'all'">{{ $t('result.exportAll', { count: exportTotal }) }}</button>
                                         </div>
-                                        <div v-else class="export-scope">导出当前页 {{ displayRows.length }} 行</div>
+                                        <div v-else class="export-scope">{{ $t('result.exportPageOnly', { count: displayRows.length }) }}</div>
                                         <div class="export-item" @click="exportCSV">CSV</div>
                                         <div class="export-item" @click="exportJSON">JSON</div>
                                         <div class="export-item" @click="exportXLSX">XLSX (Excel)</div>
@@ -892,10 +896,10 @@ export default {
                             </div>
                         </template>
                         <div v-else class="empty-result">
-                            查询 OK，影响行数: {{ displayRowCount }}
+                            {{ $t('result.okAffected', { count: displayRowCount }) }}
                         </div>
                     </template>
-                    <div v-else class="empty-result">请选择表或输入 SQL</div>
+                    <div v-else class="empty-result">{{ $t('result.empty') }}</div>
                 </template>
             </div>
 
@@ -903,9 +907,9 @@ export default {
             <el-dialog :model-value="showModal" @update:model-value="showModal = $event" width="760px" destroy-on-close append-to-body>
                 <template #header>
                     <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                        <span style="font-size: 16px; font-weight: 600;">字段 [{{ detailColumn }}] {{ detailEditable ? '编辑' : '完整值' }}</span>
+                        <span style="font-size: 16px; font-weight: 600;">{{ detailEditable ? $t('result.detailEditTitle', { column: detailColumn }) : $t('result.detailViewTitle', { column: detailColumn }) }}</span>
                         <span style="font-size: 12px; color: var(--el-text-color-secondary);">
-                            共 {{ detailValue.length }} 字符
+                            {{ $t('result.charCount', { count: detailValue.length }) }}
                             <el-tag v-if="isJson" type="success" size="small" style="margin-left: 8px;">JSON</el-tag>
                         </span>
                     </div>
@@ -920,9 +924,9 @@ export default {
                     style="font-family: monospace;"
                 />
                 <template #footer>
-                    <el-button @click="showModal = false">关闭</el-button>
-                    <el-button @click="copyDetailValue">复制完整内容</el-button>
-                    <el-button v-if="detailEditable" @click="saveDetailValue">保存</el-button>
+                    <el-button @click="showModal = false">{{ $t('common.close') }}</el-button>
+                    <el-button @click="copyDetailValue">{{ $t('result.copyFullValue') }}</el-button>
+                    <el-button v-if="detailEditable" @click="saveDetailValue">{{ $t('common.save') }}</el-button>
                 </template>
             </el-dialog>
 
@@ -930,18 +934,18 @@ export default {
                  class="context-menu result-row-context-menu"
                  :style="{ top: rowContextMenu.y + 'px', left: rowContextMenu.x + 'px' }"
                  @click.stop>
-                <div v-if="isPendingRow(rowContextMenu.row)" class="menu-item" @click="savePendingRow(rowContextMenu.row)">保存新行</div>
+                <div v-if="isPendingRow(rowContextMenu.row)" class="menu-item" @click="savePendingRow(rowContextMenu.row)">{{ $t('result.savePendingRow') }}</div>
                 <div v-if="isPendingRow(rowContextMenu.row)" class="menu-separator"></div>
                 <div class="menu-item" @click="copyRowInsert">{{ rowCopyLabel }}</div>
                 <div v-if="editableInfo.enabled" class="menu-item" @mouseenter="placeSubmenu">
-                    <span>编辑</span><span>›</span>
+                    <span>{{ $t('result.editMenu') }}</span><span>›</span>
                     <div :class="['submenu', { 'submenu-up': submenuFlip.up, 'submenu-left': submenuFlip.left }]">
-                        <div v-if="rowContextMenu.column" class="menu-item" @click="setContextCellNull">设为 NULL</div>
+                        <div v-if="rowContextMenu.column" class="menu-item" @click="setContextCellNull">{{ $t('result.setNull') }}</div>
                         <div v-if="rowContextMenu.column" class="menu-separator"></div>
-                        <div class="menu-item" @click="createRowFromContext()">新增行</div>
-                        <div class="menu-item" @click="createRowFromContext({ duplicate: true })">复制为新行</div>
+                        <div class="menu-item" @click="createRowFromContext()">{{ $t('result.addRow') }}</div>
+                        <div class="menu-item" @click="createRowFromContext({ duplicate: true })">{{ $t('result.duplicateRow') }}</div>
                         <div class="menu-separator"></div>
-                        <div class="menu-item danger" @click="deleteContextRow">删除行</div>
+                        <div class="menu-item danger" @click="deleteContextRow">{{ $t('result.deleteRow') }}</div>
                     </div>
                 </div>
             </div>

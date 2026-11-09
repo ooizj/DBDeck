@@ -10,6 +10,7 @@ from src.common.sql_utils import add_limit_to_sql, build_select_pagination, spli
 from src.services.history_service import add_history
 from src.services.result_standardizer import standardize_result
 from src.services.source_service import resolve_source
+from src.common.i18n import msg
 
 _standardize_result = standardize_result
 
@@ -82,9 +83,9 @@ def get_database_schema(source_id: int, database: str) -> dict[str, Any]:
         _, db = resolve_source(source_id)
         list_databases = getattr(db, "list_databases", None)
         if not callable(list_databases):
-            return {"success": False, "error": "当前数据源不支持跨库元数据"}
+            return {"success": False, "error": msg("当前数据源不支持跨库元数据", "This data source does not support cross-database metadata")}
         if database not in list_databases():
-            return {"success": False, "error": f"数据库不存在: {database}"}
+            return {"success": False, "error": msg(f"数据库不存在: {database}", f"Database does not exist: {database}")}
         try:
             table_comments = db.get_table_comments(database)
         except Exception:
@@ -245,18 +246,18 @@ def export_query(query: str, source_id: int, *, max_rows: int = EXPORT_MAX_ROWS)
         provider, db = resolve_source(source_id)
         dialect = _EXPORT_DIALECTS.get(provider.id)
         if dialect is None or provider.capabilities.query_language != "sql":
-            return {"success": False, "error": f"{provider.display_name} 不支持导出全部结果"}
+            return {"success": False, "error": msg(f"{provider.display_name} 不支持导出全部结果", f"{provider.display_name} does not support exporting all results")}
         statements = [s.strip().rstrip(";").strip() for s in split_sql_by_tokens(query or "", dialect=dialect)]
         statements = [s for s in statements if s]
         if len(statements) != 1:
-            return {"success": False, "error": "导出全部结果只支持单条查询语句"}
+            return {"success": False, "error": msg("导出全部结果只支持单条查询语句", "Exporting all results only works for a single query")}
         statement = statements[0]
         if provider.classify_operation(statement).kind != "read":
-            return {"success": False, "error": "只能导出只读查询的结果"}
+            return {"success": False, "error": msg("只能导出只读查询的结果", "Only results of read-only queries can be exported")}
 
         result = db.execute(_limit_for_export(statement, dialect, max_rows))
         if not isinstance(result, dict) or result.get("success") is False:
-            error = (result or {}).get("error_msg") or (result or {}).get("error") or "查询失败"
+            error = (result or {}).get("error_msg") or (result or {}).get("error") or msg("查询失败", "Query failed")
             return {"success": False, "error": error}
         raw_statements = result.get("statements") or []
         active = raw_statements[-1] if raw_statements else result
@@ -287,14 +288,14 @@ def get_table_ddl(table_name: str, source_id: int) -> dict[str, Any]:
         if not provider.capabilities.supports_ddl:
             return {
                 "success": False,
-                "error": f"{provider.display_name} 不支持 DDL 查询",
+                "error": msg(f"{provider.display_name} 不支持 DDL 查询", f"{provider.display_name} does not support DDL lookup"),
             }
         get_ddl = getattr(db, "get_ddl", None)
         if not callable(get_ddl):
-            return {"success": False, "error": "当前 provider 未实现 get_ddl"}
+            return {"success": False, "error": msg("当前数据源未实现 DDL 查询", "This data source does not implement DDL lookup")}
         ddl = get_ddl(table_name)
         if not ddl:
-            return {"success": False, "error": "Table not found or DDL not available"}
+            return {"success": False, "error": msg("表不存在或无法获取 DDL", "Table not found or DDL not available")}
         return {"success": True, "ddl": ddl}
     except Exception as e:
         return {"success": False, "error": redact_sensitive(e)}

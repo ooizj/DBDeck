@@ -15,6 +15,7 @@ test('copy row INSERT uses MySQL identifier quoting', () => {
         rowToSourceData() { return { id: 1, tenant_id: 8 }; },
         currentTableName: ResultArea.methods.currentTableName,
         sqlIdentifier: ResultArea.methods.sqlIdentifier,
+        sqlTableIdentifier: ResultArea.methods.sqlTableIdentifier,
         sqlLiteral: ResultArea.methods.sqlLiteral,
         redisArgument: ResultArea.methods.redisArgument,
         closeRowContextMenu() {},
@@ -29,6 +30,30 @@ test('copy row INSERT uses MySQL identifier quoting', () => {
         copiedSql,
         'INSERT INTO `asset_basic_info` (`id`, `tenant_id`) VALUES (1, 8);',
     );
+});
+
+
+test('copy row INSERT quotes PostgreSQL schema and table separately', () => {
+    let copiedSql = '';
+    const context = {
+        rowContextMenu: { row: { id: 1 } },
+        queryResult: { providerId: 'postgresql' },
+        editableInfo: { table: 'xapp_review.review' },
+        rowToSourceData() { return { id: 1 }; },
+        currentTableName: ResultArea.methods.currentTableName,
+        sqlIdentifier: ResultArea.methods.sqlIdentifier,
+        sqlTableIdentifier: ResultArea.methods.sqlTableIdentifier,
+        sqlLiteral: ResultArea.methods.sqlLiteral,
+        redisArgument: ResultArea.methods.redisArgument,
+        closeRowContextMenu() {},
+        $emit(event, value) {
+            if (event === 'copy') copiedSql = value;
+        },
+    };
+
+    ResultArea.methods.copyRowInsert.call(context);
+
+    assert.equal(copiedSql, 'INSERT INTO "xapp_review"."review" ("id") VALUES (1);');
 });
 
 

@@ -13,6 +13,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 import src.sources  # noqa: F401
 from src.api.routes import router
 from src.common.http_security import LocalOriginMiddleware
+from src.common.i18n import LanguageMiddleware
 from src.common.network import find_available_port
 from src.version import __version__
 
@@ -45,6 +46,8 @@ app.add_middleware(
     allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"],
 )
 app.add_middleware(LocalOriginMiddleware)
+# 最外层：为本次请求设置提示信息语言（X-DBDeck-Language）
+app.add_middleware(LanguageMiddleware)
 
 # 注册 API 路由
 app.include_router(router, prefix="/api")

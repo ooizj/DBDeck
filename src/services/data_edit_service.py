@@ -15,6 +15,7 @@ from src.common.db_utils import (
 )
 from src.common.errors import redact_sensitive
 from src.services.source_service import resolve_source
+from src.common.i18n import msg
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ def edit_row(source_id: int, table: str, operation: str, data: Dict[str, Any], w
             return _edit_mongo_row(db, table, operation, data, where)
 
         if provider.id not in ("mysql", "postgresql", "sqlite"):
-            return {"success": False, "error": f"不支持的数据库类型: {provider.id}"}
+            return {"success": False, "error": msg(f"不支持的数据库类型: {provider.id}", f"Unsupported database type: {provider.id}")}
 
         quoted_table = quote_qualified_identifier(provider.id, table)
         params: Dict[str, Any] = {}
@@ -68,7 +69,7 @@ def edit_row(source_id: int, table: str, operation: str, data: Dict[str, Any], w
         # SQL 数据库
         if operation == "insert":
             if not data:
-                return {"success": False, "error": "INSERT 操作需要数据"}
+                return {"success": False, "error": msg("INSERT 操作需要数据", "INSERT requires data")}
             column_sql = []
             placeholder_sql = []
             for idx, (key, value) in enumerate(data.items()):
@@ -80,9 +81,9 @@ def edit_row(source_id: int, table: str, operation: str, data: Dict[str, Any], w
             
         elif operation == "update":
             if not where:
-                return {"success": False, "error": "UPDATE 操作需要 WHERE 条件"}
+                return {"success": False, "error": msg("UPDATE 操作需要 WHERE 条件", "UPDATE requires a WHERE condition")}
             if not data:
-                return {"success": False, "error": "UPDATE 操作需要数据"}
+                return {"success": False, "error": msg("UPDATE 操作需要数据", "UPDATE requires data")}
             set_parts = []
             where_parts = []
             for idx, (key, value) in enumerate(data.items()):
@@ -97,7 +98,7 @@ def edit_row(source_id: int, table: str, operation: str, data: Dict[str, Any], w
             
         elif operation == "delete":
             if not where:
-                return {"success": False, "error": "DELETE 操作需要 WHERE 条件"}
+                return {"success": False, "error": msg("DELETE 操作需要 WHERE 条件", "DELETE requires a WHERE condition")}
             where_parts = []
             for idx, (key, value) in enumerate(where.items()):
                 name = _param_name("w", idx)
@@ -106,11 +107,11 @@ def edit_row(source_id: int, table: str, operation: str, data: Dict[str, Any], w
             query = f"DELETE FROM {quoted_table} WHERE {' AND '.join(where_parts)}"
             
         else:
-            return {"success": False, "error": f"不支持的操作: {operation}"}
+            return {"success": False, "error": msg(f"不支持的操作: {operation}", f"Unsupported operation: {operation}")}
 
         result = db.execute(query, params)
         if result.get("success") is False:
-            return {"success": False, "error": result.get("error_msg") or result.get("error") or "操作失败"}
+            return {"success": False, "error": result.get("error_msg") or result.get("error") or msg("操作失败", "Operation failed")}
         return {"success": True, "affected_rows": result.get('affected_rows', 1)}
         
     except Exception as e:
@@ -131,17 +132,17 @@ def _edit_mongo_row(db, collection: str, operation: str, data: Dict[str, Any], w
             
         elif operation == "update":
             if not where:
-                return {"success": False, "error": "UPDATE 操作需要过滤条件"}
+                return {"success": False, "error": msg("UPDATE 操作需要过滤条件", "UPDATE requires a filter")}
             result = mongo_collection.update_one(where, {"$set": data})
             return {"success": True, "matched_count": result.matched_count, "modified_count": result.modified_count}
             
         elif operation == "delete":
             if not where:
-                return {"success": False, "error": "DELETE 操作需要过滤条件"}
+                return {"success": False, "error": msg("DELETE 操作需要过滤条件", "DELETE requires a filter")}
             result = mongo_collection.delete_one(where)
             return {"success": True, "deleted_count": result.deleted_count}
             
-        return {"success": False, "error": f"不支持的操作: {operation}"}
+        return {"success": False, "error": msg(f"不支持的操作: {operation}", f"Unsupported operation: {operation}")}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -185,7 +186,7 @@ def export_data(
         result = db.execute(query, params) if params is not None else db.execute(query)
         
         if not result:
-            return {"success": False, "error": "查询无结果"}
+            return {"success": False, "error": msg("查询无结果", "The query returned no results")}
         
         # 获取数据
         if provider.id == "mongodb":
@@ -245,7 +246,7 @@ def export_data(
             content = '\n'.join(lines)
             
         else:
-            return {"success": False, "error": f"不支持的格式: {format}"}
+            return {"success": False, "error": msg(f"不支持的格式: {format}", f"Unsupported format: {format}")}
         
         return {
             "success": True,
@@ -271,11 +272,11 @@ def backup_database(source_id: int, tables: Optional[List[str]] = None, include_
         if not getattr(provider.capabilities, "supports_backup", False):
             return {
                 "success": False,
-                "error": f"{provider.id} 暂不支持可恢复备份",
+                "error": msg(f"{provider.id} 暂不支持可恢复备份", f"{provider.id} does not support restorable backups yet"),
             }
 
         if not include_structure and not include_data:
-            return {"success": False, "error": "请至少选择表结构或数据中的一项"}
+            return {"success": False, "error": msg("请至少选择表结构或数据中的一项", "Select table structure, data, or both")}
         
         if not tables:
             schema = db.get_schema()
@@ -291,7 +292,7 @@ def backup_database(source_id: int, tables: Optional[List[str]] = None, include_
                 if callable(get_ddl):
                     ddl = get_ddl(table)
                     if ddl:
-                        backup_sql.append(f"-- 表结构: {table}")
+                        backup_sql.append(msg(f"-- 表结构: {table}", f"-- Structure: {table}"))
                         backup_sql.append(_terminate_sql_statement(ddl))
                         backup_sql.append("")
             
@@ -301,11 +302,11 @@ def backup_database(source_id: int, tables: Optional[List[str]] = None, include_
                 if result and result.get("success") is False:
                     return {
                         "success": False,
-                        "error": result.get("error_msg") or result.get("error") or f"读取表 {table} 失败",
+                        "error": result.get("error_msg") or result.get("error") or msg(f"读取表 {table} 失败", f"Failed to read table {table}"),
                     }
                 if result and 'data' in result:
                     columns = result.get('columns', [])
-                    backup_sql.append(f"-- 数据: {table}")
+                    backup_sql.append(msg(f"-- 数据: {table}", f"-- Data: {table}"))
                     for row in result['data']:
                         values = [
                             _sql_literal(row.get(column)) for column in columns

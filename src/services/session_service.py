@@ -9,6 +9,7 @@ import logging
 
 from src.common.db_utils import managed_source
 from src.common.errors import redact_sensitive
+from src.common.i18n import msg
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ def get_sessions(source_id: int) -> dict:
                 return {"success": True, "sessions": sessions}
 
             elif provider.id == "sqlite":
-                return {"success": True, "sessions": [], "message": "SQLite 不支持多会话"}
+                return {"success": True, "sessions": [], "message": msg("SQLite 不支持多会话", "SQLite does not have multiple sessions")}
 
             elif provider.id == "mongodb":
                 result = db.execute("db.currentOp(true)")
@@ -105,7 +106,7 @@ def get_sessions(source_id: int) -> dict:
                             })
                 return {"success": True, "sessions": sessions}
 
-            return {"success": False, "error": f"不支持的数据库类型: {provider.id}"}
+            return {"success": False, "error": msg(f"不支持的数据库类型: {provider.id}", f"Unsupported database type: {provider.id}")}
 
     except Exception as e:
         return {"success": False, "error": redact_sensitive(e)}
@@ -116,28 +117,28 @@ def kill_session(source_id: int, session_id: str) -> dict:
     try:
         numeric_session_id = int(session_id)
         if numeric_session_id < 0:
-            raise ValueError("会话 ID 必须是非负整数")
+            raise ValueError(msg("会话 ID 必须是非负整数", "The session ID must be a non-negative integer"))
         with managed_source(source_id) as (provider, db):
             if provider.id == "mysql":
                 db.execute(f"KILL {numeric_session_id}")
-                return {"success": True, "message": f"已终止会话 {numeric_session_id}"}
+                return {"success": True, "message": msg(f"已终止会话 {numeric_session_id}", f"Session {numeric_session_id} killed")}
 
             elif provider.id == "postgresql":
                 db.execute(
                     "SELECT pg_terminate_backend(:session_id)",
                     {"session_id": numeric_session_id},
                 )
-                return {"success": True, "message": f"已终止会话 {numeric_session_id}"}
+                return {"success": True, "message": msg(f"已终止会话 {numeric_session_id}", f"Session {numeric_session_id} killed")}
 
             elif provider.id == "mongodb":
                 db.execute(f"db.killOp({numeric_session_id})")
-                return {"success": True, "message": f"已终止会话 {numeric_session_id}"}
+                return {"success": True, "message": msg(f"已终止会话 {numeric_session_id}", f"Session {numeric_session_id} killed")}
 
             elif provider.id == "redis":
                 db.execute(f"CLIENT KILL ID {numeric_session_id}")
-                return {"success": True, "message": f"已终止会话 {numeric_session_id}"}
+                return {"success": True, "message": msg(f"已终止会话 {numeric_session_id}", f"Session {numeric_session_id} killed")}
 
-            return {"success": False, "error": f"不支持的数据库类型: {provider.id}"}
+            return {"success": False, "error": msg(f"不支持的数据库类型: {provider.id}", f"Unsupported database type: {provider.id}")}
 
     except Exception as e:
         return {"success": False, "error": redact_sensitive(e)}

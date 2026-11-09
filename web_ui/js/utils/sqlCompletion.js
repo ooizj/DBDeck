@@ -438,7 +438,20 @@ const createCatalog = ({ getCurrentTables, getCurrentDatabase, loadDatabases, lo
         }
     };
 
+    /** 当前表里名为「前缀.xxx」的对象（PostgreSQL 非默认模式的表），返回去掉前缀后的副本。 */
+    const tablesWithPrefix = (prefix) => {
+        const lower = `${prefix}.`.toLowerCase();
+        return currentTables()
+            .filter(table => table.name.toLowerCase().startsWith(lower))
+            .map(table => ({ ...table, name: table.name.slice(lower.length) }));
+    };
+
     const resolveTable = async (ref) => {
+        // PostgreSQL 非默认模式的表在当前表里以「模式.表名」命名
+        if (ref.database) {
+            const qualified = findTable(currentTables(), `${ref.database}.${ref.name}`);
+            if (qualified) return qualified;
+        }
         const tables = await tablesOf(ref.database);
         // 未识别的前缀（如 PostgreSQL 的 schema）退回当前表
         return findTable(tables || currentTables(), ref.name);
@@ -454,7 +467,7 @@ const createCatalog = ({ getCurrentTables, getCurrentDatabase, loadDatabases, lo
         }
     };
 
-    return { currentTables, databases, tablesOf, resolveTable, functions, supportsDatabases };
+    return { currentTables, databases, tablesOf, tablesWithPrefix, resolveTable, functions, supportsDatabases };
 };
 
 const referencedColumns = async (monaco, catalog, maskedStatement, range) => {
@@ -495,6 +508,8 @@ const statementKindOf = (maskedStatement) => (
 /** 表名位置的补全：`库.` 之后给出该库的表，否则给出当前库的表和其他库名。 */
 const relationSuggestions = async (monaco, catalog, qualifier, range, inBacktick) => {
     if (qualifier) {
+        const schemaTables = catalog.tablesWithPrefix(qualifier);
+        if (schemaTables.length) return schemaTables.map(table => tableSuggestion(monaco, table, range));
         const tables = await catalog.tablesOf(qualifier);
         return (tables || catalog.currentTables()).map(table => tableSuggestion(monaco, table, range));
     }

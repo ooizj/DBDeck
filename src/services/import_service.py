@@ -7,6 +7,7 @@ import logging
 from typing import Any, Dict, List
 
 from src.common.sql_identifiers import quote_identifier
+from src.common.i18n import msg
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ def import_file(
         data, headers = _parse_csv(content)
 
     if not data or not headers:
-        return {"success": False, "error": "文件为空或格式不正确"}
+        return {"success": False, "error": msg("文件为空或格式不正确", "The file is empty or not in a supported format")}
 
     if not table_name:
         table_name = filename.rsplit(".", 1)[0].replace(" ", "_").replace("-", "_")

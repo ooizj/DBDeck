@@ -65,6 +65,10 @@ class ConfigUpdateRequest(BaseModel):
     settings: Dict[str, Any]
 
 
+class UiPreferencesRequest(BaseModel):
+    language: Optional[str] = None
+
+
 class ImportRequest(BaseModel):
     data_sources: List[Dict[str, Any]]
     system_config: Dict[str, Any]

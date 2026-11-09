@@ -22,6 +22,7 @@ from src.ai_core.tools.registry import ToolContext, serialize_result
 from src.ai_core.tool_policy import needs_confirmation
 from src.common.config import config
 from src.sources.base import DataSourceClient, SourceProvider
+from src.common.i18n import msg
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +173,10 @@ class Agent:
         if not config.llm_api_key or config.llm_api_key == "your_api_key_here":
             yield {
                 "type": "error",
-                "message": "未配置 LLM API Key。请点击右上角的“设置”按钮进行配置。",
+                "message": msg(
+                    "未配置 LLM API Key。请点击顶部工具栏的“设置”进行配置。",
+                    "No LLM API key is configured. Open Settings in the top toolbar to add one.",
+                ),
             }
             return
 
@@ -213,10 +217,10 @@ class Agent:
             try:
                 _, pid, decision = user_input.split(":", 2)
             except ValueError:
-                yield {"type": "error", "message": "确认指令格式错误"}
+                yield {"type": "error", "message": msg("确认指令格式错误", "Malformed confirmation command")}
                 return
             if not self.pending or self.pending.get("pending_id") != pid:
-                yield {"type": "error", "message": "没有匹配的待确认操作（可能已过期）"}
+                yield {"type": "error", "message": msg("没有匹配的待确认操作（可能已过期）", "No matching pending action (it may have expired)")}
                 return
             pending = self.pending
             self.pending = None
@@ -303,7 +307,10 @@ class Agent:
                                 logger.warning(
                                     f"[Agent] Reasoning loop detected! Cutting off stream. End reasoning snippet: {full_reasoning[-100:]!r}"
                                 )
-                                warning_msg = "\n\n[模型在思考过程中陷入重复循环，已自动中断以避免消耗过多 Token，请重试或简化问题。]"
+                                warning_msg = msg(
+                                    "\n\n[模型在思考过程中陷入重复循环，已自动中断以避免消耗过多 Token，请重试或简化问题。]",
+                                    "\n\n[The model got stuck repeating itself while reasoning and was stopped to save tokens. Try again or simplify the question.]",
+                                )
                                 full_content += warning_msg
                                 yield {"type": "delta", "content": warning_msg}
                                 break
@@ -314,7 +321,10 @@ class Agent:
                                 logger.warning(
                                     f"[Agent] Repetition loop detected! Cutting off stream. End content snippet: {full_content[-100:]!r}"
                                 )
-                                warning_msg = "\n\n[检测到模型生成内容出现异常重复循环，已自动拦截中断，避免消耗过多 Token]"
+                                warning_msg = msg(
+                                    "\n\n[检测到模型生成内容出现异常重复循环，已自动拦截中断，避免消耗过多 Token]",
+                                    "\n\n[The model's output started repeating itself and was stopped to save tokens.]",
+                                )
                                 full_content += warning_msg
                                 yield {"type": "delta", "content": warning_msg}
                                 break
@@ -343,7 +353,10 @@ class Agent:
                         logger.warning(
                             f"[Agent] Output truncated by max_tokens={config.llm_max_tokens}."
                         )
-                        length_note = "\n\n[已达到最大输出长度上限并被截断。可在「设置」中调高 Max Tokens，或简化问题后重试。]"
+                        length_note = msg(
+                            "\n\n[已达到最大输出长度上限并被截断。可在「设置」中调高单次最大输出 Token，或简化问题后重试。]",
+                            "\n\n[The reply hit the maximum output length and was cut off. Raise \"Max output tokens per reply\" in Settings, or simplify the question.]",
+                        )
                         full_content += length_note
                         yield {"type": "delta", "content": length_note}
 
@@ -497,11 +510,14 @@ class Agent:
 
             yield {
                 "type": "error",
-                "message": f"达到最大迭代次数 {_MAX_ITERATIONS}，可能陷入循环",
+                "message": msg(
+                    f"达到最大迭代次数 {_MAX_ITERATIONS}，可能陷入循环",
+                    f"Reached the maximum of {_MAX_ITERATIONS} iterations; the assistant may be stuck in a loop",
+                ),
             }
         except Exception as e:
             logger.error(f"Agent error: {e}", exc_info=True)
-            yield {"type": "error", "message": f"处理请求时出错: {e}"}
+            yield {"type": "error", "message": msg(f"处理请求时出错: {e}", f"Error while handling the request: {e}")}
 
 
 class AgentManager:

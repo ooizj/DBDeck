@@ -116,7 +116,7 @@ def get_table_columns(db: DataSourceClient, provider: SourceProvider, table: str
                 LEFT JOIN pg_catalog.pg_description pgd
                   ON pgd.objoid = st.relid AND pgd.objsubid = c.ordinal_position
                 WHERE c.table_name = :table_name
-                  AND (:schema_name IS NULL OR c.table_schema = :schema_name)
+                  AND c.table_schema = COALESCE(:schema_name, current_schema())
                 ORDER BY c.ordinal_position
             """, {"table_name": table_name, "schema_name": schema})
             if result and 'data' in result:
@@ -191,7 +191,7 @@ def get_table_indexes(db: DataSourceClient, provider: SourceProvider, table: str
                 SELECT indexname, indexdef
                 FROM pg_indexes
                 WHERE tablename = :table_name
-                  AND (:schema_name IS NULL OR schemaname = :schema_name)
+                  AND schemaname = COALESCE(:schema_name, current_schema())
             """, {"table_name": table_name, "schema_name": schema})
             if result and 'data' in result:
                 return [{'name': row[0], 'definition': row[1]} for row in result['data']]

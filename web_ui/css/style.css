@@ -480,6 +480,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     margin-left: 0;
 }
 
+
+
 .tool-button {
     height: 28px;
     display: inline-flex;
@@ -1661,7 +1663,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     font-size: 13px;
     line-height: 1.5;
     white-space: pre-wrap;
-    word-break: break-all;
+    overflow-wrap: anywhere;
 }
 
 .result-tab-spacer { flex: 1; }
@@ -1891,7 +1893,7 @@ tbody tr.result-row-pending td {
     border-radius: 6px;
     font-size: 12px;
     line-height: 1.6;
-    word-break: break-all;
+    overflow-wrap: anywhere;
     white-space: pre-wrap;
 }
 
@@ -2451,7 +2453,7 @@ tbody tr.result-row-pending td {
     color: var(--text-secondary);
     margin-bottom: 24px;
     white-space: pre-wrap;
-    word-break: break-all;
+    overflow-wrap: anywhere;
 }
 
 .message-box-footer { display: flex; justify-content: flex-end; gap: 12px; }
@@ -5582,7 +5584,9 @@ html.dark ::selection {
 
 .ts-cond-label {
     flex-shrink: 0;
-    width: 32px;
+    /* 英文标签（Scope / Columns / Filter）比中文长，按内容定宽且不换行 */
+    min-width: 32px;
+    white-space: nowrap;
     font-size: 12px;
     font-weight: 600;
     color: var(--text-secondary);
@@ -5590,6 +5594,7 @@ html.dark ::selection {
 
 .ts-inline-label {
     flex-shrink: 0;
+    white-space: nowrap;
     font-size: 12px;
     color: var(--text-secondary);
 }
@@ -5896,4 +5901,9 @@ html.dark ::selection {
     padding: 6px 10px;
     font-size: 12px;
     color: var(--text-muted);
+}
+
+/* 设置 → 通用：语言选项与说明上下排列 */
+.settings-language {
+    width: 100%;
 }

@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 // 通知 / 确认对话框统一委托到 Element Plus 的 ElMessage / ElMessageBox。
 // 保持原 useNotifications 的 notify / showMessage / showConfirm 函数签名不变，
 // 调用方（app.js 及各组件、作为 props 传入的 ImportPanel 等）无需任何改动，
@@ -14,32 +15,32 @@ export function useNotifications() {
     };
 
     // 返回 Promise<true>（与旧实现一致：用户点击确定后 resolve true）
-    const showMessage = (msg, title = "提示", type = "info") => {
+    const showMessage = (msg, title = t("common.notice"), type = "info") => {
         const { ElMessageBox } = ElementPlus;
         return ElMessageBox.alert(msg, title, {
             type: _EP_TYPE(type),
-            confirmButtonText: "确定",
+            confirmButtonText: t("common.ok"),
         }).then(() => true);
     };
 
     // 返回 Promise<boolean>：确认 -> true，取消 -> false（保留旧实现语义，取消不抛错）
-    const showConfirm = (msg, title = "确认") => {
+    const showConfirm = (msg, title = t("common.confirm")) => {
         const { ElMessageBox } = ElementPlus;
         return ElMessageBox.confirm(msg, title, {
             type: "warning",
-            confirmButtonText: "确定",
-            cancelButtonText: "取消",
+            confirmButtonText: t("common.ok"),
+            cancelButtonText: t("common.cancel"),
         })
             .then(() => true)
             .catch(() => false);
     };
 
     // 返回 Promise<string|null>：确定 -> 输入的文本，取消 -> null
-    const showPrompt = (msg, title = "输入", { inputValue = "", placeholder = "" } = {}) => {
+    const showPrompt = (msg, title = t("common.input"), { inputValue = "", placeholder = "" } = {}) => {
         const { ElMessageBox } = ElementPlus;
         return ElMessageBox.prompt(msg, title, {
-            confirmButtonText: "确定",
-            cancelButtonText: "取消",
+            confirmButtonText: t("common.ok"),
+            cancelButtonText: t("common.cancel"),
             inputValue,
             inputPlaceholder: placeholder,
         })

@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 const { ref, watch, computed } = Vue;
 
 export function useMigration({ dbService, getTree, getProvider, showMessage, showConfirm, isLoading }) {
@@ -38,7 +39,7 @@ export function useMigration({ dbService, getTree, getProvider, showMessage, sho
             const res = await dbService.getMetadata(numericId);
             if (migrateSourceId.value !== numericId) return;
             if (!res.success) {
-                migrateTablesError.value = '读取表失败: ' + (res.error || '未知错误');
+                migrateTablesError.value = t('migrate.loadTablesFailed', { error: res.error || t('common.unknownError') });
                 return;
             }
             const objectTypes = res.object_types || {};
@@ -47,7 +48,7 @@ export function useMigration({ dbService, getTree, getProvider, showMessage, sho
                 .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
                 .map(name => ({ name }));
         } catch (e) {
-            if (migrateSourceId.value === numericId) migrateTablesError.value = '读取表失败: ' + e.message;
+            if (migrateSourceId.value === numericId) migrateTablesError.value = t('migrate.loadTablesFailed', { error: e.message });
         } finally {
             if (migrateSourceId.value === numericId) migrateTablesLoading.value = false;
         }
@@ -58,22 +59,24 @@ export function useMigration({ dbService, getTree, getProvider, showMessage, sho
         const src = migrateSources.value.find(s => s.id === migrateSourceId.value);
         const count = selectedMigrateTables.value.length;
         const ok = await showConfirm(
-            `将 ${count} 张表从「${src?.name}」复制到「${dest?.name}」。目标库已有同名表时会直接追加数据，此操作不可撤销。确定继续？`,
-            '确认迁移'
+            t('migrate.confirm', { count, source: src?.name, target: dest?.name }),
+            t('migrate.confirmTitle')
         );
         if (!ok) return;
         isLoading.value = true;
         try {
             const res = await dbService.migrate({ src_id: migrateSourceId.value, dest_id: migrateDestId.value, tables: selectedMigrateTables.value });
             if (res.success === false) {
-                showMessage('迁移失败: ' + res.error, '迁移失败', 'error');
+                showMessage(t('migrate.failed', { error: res.error }), t('migrate.failedTitle'), 'error');
                 return;
             }
-            const msg = '迁移结果:\n' + res.details.map(d => `${d.table}: ${d.result.success ? '成功' : '失败(' + d.result.error + ')'}`).join('\n');
-            showMessage(msg, '迁移完成');
+            const lines = res.details.map(d => (d.result.success
+                ? t('migrate.tableOk', { table: d.table })
+                : t('migrate.tableFailed', { table: d.table, error: d.result.error })));
+            showMessage(`${t('migrate.result')}\n${lines.join('\n')}`, t('migrate.doneTitle'));
             showMigrateModal.value = false;
         } catch (e) {
-            showMessage('迁移请求异常: ' + e.message, '错误', 'error');
+            showMessage(t('migrate.failed', { error: e.message }), t('common.error'), 'error');
         } finally { isLoading.value = false; }
     };
 

@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 const { ref, watch } = Vue;
 
 export function useQueryHistory({ dbService, getEditor, getActiveTab, showMessage, showConfirm, notify }) {
@@ -35,12 +36,12 @@ export function useQueryHistory({ dbService, getEditor, getActiveTab, showMessag
     };
 
     const clearAllHistory = async () => {
-        if (await showConfirm('确定要清空所有查询历史吗？')) {
+        if (await showConfirm(t('history.clearConfirm'))) {
             try {
                 await dbService.clearHistory();
                 historyItems.value = [];
-                notify('历史已清空', 'success');
-            } catch (e) { showMessage('清空失败: ' + e.message, '错误', 'error'); }
+                notify(t('history.cleared'), 'success');
+            } catch (e) { showMessage(t('history.clearFailed', { error: e.message }), t('common.error'), 'error'); }
         }
     };
 

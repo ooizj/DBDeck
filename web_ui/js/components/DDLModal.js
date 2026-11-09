@@ -24,8 +24,8 @@ export default {
                 style="font-family: 'Consolas', 'Courier New', monospace; font-size: 13px;"
             />
             <template #footer>
-                <el-button @click="$emit('close')">关闭</el-button>
-                <el-button type="primary" @click="$emit('copy', content)">复制内容</el-button>
+                <el-button @click="$emit('close')">{{ $t('common.close') }}</el-button>
+                <el-button type="primary" @click="$emit('copy', content)">{{ $t('common.copy') }}</el-button>
             </template>
         </el-dialog>
     `,

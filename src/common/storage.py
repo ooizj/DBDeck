@@ -142,6 +142,11 @@ class Storage:
             )
             conn.commit()
 
+    def delete_config(self, key: str) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM system_config WHERE key = ?", (key,))
+            conn.commit()
+
     def get_config(self, key: str, default: str = "") -> str:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("SELECT value FROM system_config WHERE key = ?", (key,))

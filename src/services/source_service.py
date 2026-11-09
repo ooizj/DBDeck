@@ -9,6 +9,7 @@ from src.common.storage import storage
 from src.sources import all_providers, get_provider, has_provider
 from src.sources.base import DataSourceClient, SourceProvider
 from src.sources.connection_manager import connection_manager
+from src.common.i18n import msg
 
 
 def model_to_dict(model: Any) -> Dict[str, Any]:
@@ -21,10 +22,10 @@ def model_to_dict(model: Any) -> Dict[str, Any]:
 def resolve_source(source_id: int) -> Tuple[SourceProvider, DataSourceClient]:
     source = storage.get_source(source_id)
     if not source:
-        raise HTTPException(status_code=404, detail="Source not found")
+        raise HTTPException(status_code=404, detail=msg("连接不存在", "Connection not found"))
     db_type = source.get("type") or "mysql"
     if not has_provider(db_type):
-        raise HTTPException(status_code=400, detail=f"Unsupported source type: {db_type}")
+        raise HTTPException(status_code=400, detail=msg(f"不支持的数据源类型: {db_type}", f"Unsupported source type: {db_type}"))
     provider = get_provider(db_type)
     return provider, connection_manager.get(source_id, source, provider)
 
@@ -32,16 +33,16 @@ def resolve_source(source_id: int) -> Tuple[SourceProvider, DataSourceClient]:
 def provider_for_payload(payload: Dict[str, Any]) -> SourceProvider:
     db_type = payload.get("type") or "mysql"
     if not has_provider(db_type):
-        raise HTTPException(status_code=400, detail=f"Unsupported source type: {db_type}")
+        raise HTTPException(status_code=400, detail=msg(f"不支持的数据源类型: {db_type}", f"Unsupported source type: {db_type}"))
     return get_provider(db_type)
 
 
 def validate_source_payload(payload: Dict[str, Any]) -> None:
     db_type = payload.get("type") or "mysql"
     if db_type == "mysql" and not (payload.get("database") or "").strip():
-        raise ValueError("MySQL 数据库名称不能为空，请先选择或填写数据库名称")
+        raise ValueError(msg("MySQL 数据库名称不能为空，请先选择或填写数据库名称", "The MySQL database name is empty; select or enter a database name"))
     if db_type == "postgresql" and not (payload.get("database") or "").strip():
-        raise ValueError("PostgreSQL 数据库名称不能为空，请先选择或填写数据库名称")
+        raise ValueError(msg("PostgreSQL 数据库名称不能为空，请先选择或填写数据库名称", "The PostgreSQL database name is empty; select or enter a database name"))
 
 
 def list_provider_metadata() -> list[dict[str, Any]]:
@@ -74,7 +75,7 @@ def test_source(payload: Dict[str, Any]) -> dict[str, Any]:
         provider = provider_for_payload(payload)
         client = provider.create_client(payload)
         client.get_schema()
-        return {"success": True, "message": "Connection successful"}
+        return {"success": True, "message": msg("连接成功", "Connection succeeded")}
     except Exception as e:
         return {
             "success": False,
@@ -127,7 +128,7 @@ def set_source_group(source_id: int, group_name: str) -> dict[str, Any]:
 
 def rename_group(group_id: int, name: str) -> dict[str, Any]:
     if not (name or "").strip():
-        return {"success": False, "error": "分组名称不能为空"}
+        return {"success": False, "error": msg("分组名称不能为空", "The group name cannot be empty")}
     storage.rename_group(group_id, name)
     return {"success": True}
 

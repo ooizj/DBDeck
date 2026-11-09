@@ -23,21 +23,21 @@ export default {
                 <el-input
                     :model-value="search"
                     @update:model-value="(v) => $emit('update:search', v)"
-                    placeholder="搜索查询历史..."
+                    :placeholder="$t('history.searchPlaceholder')"
                     size="small"
                     clearable
                 />
-                <el-button size="small" @click="$emit('clear')" title="清空历史">清空</el-button>
+                <el-button size="small" @click="$emit('clear')" :title="$t('history.clearTitle')">{{ $t('history.clear') }}</el-button>
             </div>
             <div class="history-list">
-                <div v-if="!items.length" class="history-empty">暂无查询历史</div>
+                <div v-if="!items.length" class="history-empty">{{ $t('history.empty') }}</div>
                 <div v-for="item in items" :key="item.id" class="history-item" @click="$emit('select', item)">
                     <div class="history-item-header">
                         <span :class="statusClass(item.status)">{{ item.status === 'error' ? '✕' : '✓' }}</span>
                         <span class="history-time">{{ formatTime(item.created_at) }}</span>
                         <span v-if="item.source_name" class="history-source">{{ item.source_name }}</span>
                         <span v-if="item.duration_ms" class="history-duration">{{ item.duration_ms.toFixed(0) }}ms</span>
-                        <span v-if="item.row_count" class="history-rows">{{ item.row_count }} rows</span>
+                        <span v-if="item.row_count" class="history-rows">{{ $t('history.rows', { count: item.row_count }) }}</span>
                     </div>
                     <div class="history-query">{{ truncate(item.query) }}</div>
                 </div>

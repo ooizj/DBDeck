@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 const { ref, reactive } = Vue;
 
 export function useRedis({ dbService, getCurrentSource, getTree, notify, showMessage, showConfirm, loadMetadata, getProvider }) {
@@ -79,7 +80,7 @@ export function useRedis({ dbService, getCurrentSource, getTree, notify, showMes
         try {
             return { ok: true, value: JSON.parse(value || (type === 'hash' ? '{}' : '[]')) };
         } catch (e) {
-            return { ok: false, error: `${type} 类型的值必须是合法 JSON: ${e.message}` };
+            return { ok: false, error: t('redis.invalidJson', { type, error: e.message }) };
         }
     };
 
@@ -126,39 +127,39 @@ export function useRedis({ dbService, getCurrentSource, getTree, notify, showMes
         const commands = [`DEL ${quoteRedisArg(keyName)}`];
         if (type === 'hash') {
             const entries = redisHashEntries(parsed.value);
-            if (!entries) return { error: 'Hash 值必须是对象，或由 field/value 组成的数组' };
-            if (!entries.length) return { error: 'Redis 不支持空 Hash key；请至少保留一个 field，或直接删除 key' };
+            if (!entries) return { error: t('redis.hashInvalid') };
+            if (!entries.length) return { error: t('redis.emptyNotAllowed', { type: 'Hash', item: 'field' }) };
             if (entries.some(([field]) => field === undefined || field === null || String(field) === '')) {
-                return { error: 'Hash field 不能为空' };
+                return { error: t('redis.hashFieldEmpty') };
             }
             commands.push(`HSET ${quoteRedisArg(keyName)} ${entries.flatMap(([field, value]) => [quoteRedisArg(field), quoteRedisArg(value)]).join(' ')}`);
             return commands;
         }
         if (type === 'list') {
             const entries = redisArrayEntries(parsed.value);
-            if (!entries) return { error: 'List 值必须是数组' };
-            if (!entries.length) return { error: 'Redis 不支持空 List key；请至少保留一个元素，或直接删除 key' };
+            if (!entries) return { error: t('redis.mustBeArray', { type: 'List' }) };
+            if (!entries.length) return { error: t('redis.emptyNotAllowed', { type: 'List', item: t('redis.itemElement') }) };
             commands.push(`RPUSH ${quoteRedisArg(keyName)} ${entries.map(quoteRedisArg).join(' ')}`);
             return commands;
         }
         if (type === 'set') {
             const entries = redisArrayEntries(parsed.value);
-            if (!entries) return { error: 'Set 值必须是数组' };
-            if (!entries.length) return { error: 'Redis 不支持空 Set key；请至少保留一个成员，或直接删除 key' };
+            if (!entries) return { error: t('redis.mustBeArray', { type: 'Set' }) };
+            if (!entries.length) return { error: t('redis.emptyNotAllowed', { type: 'Set', item: t('redis.itemMember') }) };
             commands.push(`SADD ${quoteRedisArg(keyName)} ${entries.map(quoteRedisArg).join(' ')}`);
             return commands;
         }
         if (type === 'zset') {
             const entries = redisZSetEntries(parsed.value);
-            if (!entries) return { error: 'ZSet 值必须是数组或对象' };
-            if (!entries.length) return { error: 'Redis 不支持空 ZSet key；请至少保留一个成员，或直接删除 key' };
+            if (!entries) return { error: t('redis.zsetInvalid') };
+            if (!entries.length) return { error: t('redis.emptyNotAllowed', { type: 'ZSet', item: t('redis.itemMember') }) };
             const parts = [];
             for (const item of entries) {
                 if (item.member === undefined || item.member === null || String(item.member) === '') {
-                    return { error: 'ZSet member 不能为空' };
+                    return { error: t('redis.zsetMemberEmpty') };
                 }
                 const score = Number(item.score);
-                if (!Number.isFinite(score)) return { error: `ZSet member "${item.member}" 的 score 必须是数字` };
+                if (!Number.isFinite(score)) return { error: t('redis.zsetScoreInvalid', { member: item.member }) };
                 parts.push(String(score), quoteRedisArg(item.member));
             }
             commands.push(`ZADD ${quoteRedisArg(keyName)} ${parts.join(' ')}`);
@@ -166,19 +167,19 @@ export function useRedis({ dbService, getCurrentSource, getTree, notify, showMes
         }
         if (type === 'stream') {
             const entries = redisStreamEntries(parsed.value);
-            if (!entries) return { error: 'Stream 值必须是数组' };
-            if (!entries.length) return { error: 'Redis 不支持空 Stream key；请至少保留一条消息，或直接删除 key' };
+            if (!entries) return { error: t('redis.mustBeArray', { type: 'Stream' }) };
+            if (!entries.length) return { error: t('redis.emptyNotAllowed', { type: 'Stream', item: t('redis.itemEntry') }) };
             for (const item of entries) {
                 if (!item.fields || typeof item.fields !== 'object' || Array.isArray(item.fields)) {
-                    return { error: 'Stream 每条记录必须包含 fields 对象' };
+                    return { error: t('redis.streamFieldsMissing') };
                 }
                 const fieldEntries = Object.entries(item.fields);
-                if (!fieldEntries.length) return { error: 'Stream 记录的 fields 不能为空' };
+                if (!fieldEntries.length) return { error: t('redis.streamFieldsEmpty') };
                 commands.push(`XADD ${quoteRedisArg(keyName)} ${quoteRedisArg(item.id || '*')} ${fieldEntries.flatMap(([field, value]) => [quoteRedisArg(field), quoteRedisArg(value)]).join(' ')}`);
             }
             return commands;
         }
-        return { error: `暂不支持保存 ${type} 类型` };
+        return { error: t('redis.typeUnsupported', { type }) };
     };
 
     const normalizeRedisTtl = (value) => {
@@ -237,7 +238,7 @@ export function useRedis({ dbService, getCurrentSource, getTree, notify, showMes
             const currentSource = getCurrentSource();
             if (currentSource?.id !== source.id || selectedRedisKeyName.value !== keyName) return;
             if (data.success === false) {
-                redisKeyEditor.error = data.error || '读取 Redis key 失败';
+                redisKeyEditor.error = data.error || t('redis.loadFailed');
                 return;
             }
             redisKeyEditor.value = redisResultToText(keyType, data);
@@ -253,12 +254,12 @@ export function useRedis({ dbService, getCurrentSource, getTree, notify, showMes
         if (!source || source.db_type !== 'redis') return;
         const keyName = redisKeyEditor.key.trim();
         if (!keyName) {
-            notify('请输入 Redis key 名称', 'warning');
+            notify(t('redis.keyRequired'), 'warning');
             return;
         }
         const ttl = normalizeRedisTtl(redisKeyEditor.ttl);
         if (ttl === null) {
-            notify('TTL 必须是 -1 或非负整数', 'warning');
+            notify(t('redis.ttlInvalid'), 'warning');
             return;
         }
         const commands = buildRedisWriteCommands(redisKeyEditor.type, keyName, redisKeyEditor.value);
@@ -275,10 +276,10 @@ export function useRedis({ dbService, getCurrentSource, getTree, notify, showMes
         try {
             const data = await dbService.executeSql(commands.join('\n'), source.id);
             if (data.success === false) {
-                redisKeyEditor.error = data.error || '保存 Redis key 失败';
+                redisKeyEditor.error = data.error || t('redis.saveFailed');
                 return;
             }
-            notify('Redis key 已保存', 'success');
+            notify(t('redis.saved'), 'success');
             redisKeyEditor.mode = 'existing';
             redisKeyEditor.originalKey = keyName;
             selectedRedisKeyName.value = keyName;
@@ -308,15 +309,15 @@ export function useRedis({ dbService, getCurrentSource, getTree, notify, showMes
         const source = findCurrentTreeSource();
         const keyName = redisKeyEditor.originalKey || redisKeyEditor.key;
         if (!source || !keyName) return;
-        if (!await showConfirm(`确定要删除 Redis key "${keyName}" 吗？`)) return;
+        if (!await showConfirm(t('redis.deleteConfirm', { key: keyName }))) return;
         redisKeyEditor.saving = true;
         try {
             const data = await dbService.executeSql(`DEL ${quoteRedisArg(keyName)}`, source.id);
             if (data.success === false) {
-                redisKeyEditor.error = data.error || '删除 Redis key 失败';
+                redisKeyEditor.error = data.error || t('redis.deleteFailed');
                 return;
             }
-            notify('Redis key 已删除', 'success');
+            notify(t('redis.deleted'), 'success');
             resetRedisKeyEditor();
             await loadMetadata(source, { keyPattern: redisKeyPattern.value || '*' });
         } catch (e) {
@@ -333,7 +334,7 @@ export function useRedis({ dbService, getCurrentSource, getTree, notify, showMes
         try {
             expandedIdsRef.value = [source.id];
             await loadMetadata(source, { keyPattern: redisKeyPattern.value || '*' });
-            notify(`已按 ${redisKeyPattern.value || '*'} 搜索 Redis key`, 'success');
+            notify(t('redis.searched', { pattern: redisKeyPattern.value || '*' }), 'success');
         } finally {
             redisToolbarLoading.value = false;
         }

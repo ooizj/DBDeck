@@ -110,3 +110,18 @@ export function formatSqlLiteral(value, dialect) {
     }
     return "'" + text.replace(/'/g, "''") + "'";
 }
+
+const quoteSqlIdentifier = (name, quote) => quote + String(name).split(quote).join(quote + quote) + quote;
+
+/**
+ * 给表名加引号。PostgreSQL 非默认模式的表在导航树里命名为「模式.表名」，需按段分别加引号；
+ * MySQL / SQLite 的表名不含模式前缀，整体作为一个标识符。
+ */
+export function quoteTableName(name, providerId) {
+    if (providerId === 'mysql') return quoteSqlIdentifier(name, '`');
+    const parts = String(name).split('.');
+    if (providerId === 'postgresql' && parts.length === 2 && parts.every(Boolean)) {
+        return parts.map(part => quoteSqlIdentifier(part, '"')).join('.');
+    }
+    return quoteSqlIdentifier(name, '"');
+}

@@ -1,5 +1,7 @@
 # Code of Conduct
 
+[简体中文](CODE_OF_CONDUCT.zh-CN.md) | **English**
+
 Be respectful, constructive, and welcoming. Harassment, discrimination,
 personal attacks, and publication of another person's private information are
 not acceptable in project spaces.

@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, UploadFile
+from fastapi.concurrency import run_in_threadpool
 
 from src.services.import_service import import_file
 
@@ -23,7 +24,7 @@ async def import_data(
     content = await file.read()
     filename = file.filename or "data.csv"
     try:
-        result = import_file(content, filename, source_id, table_name, mode)
+        result = await run_in_threadpool(import_file, content, filename, source_id, table_name, mode)
         return result
     except Exception as e:
         logger.error(f"Import failed: {e}", exc_info=True)
